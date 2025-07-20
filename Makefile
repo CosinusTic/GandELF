@@ -6,7 +6,7 @@ TEST_FLAGS=-O0 -fno-omit-frame-pointer
 TARGET=bin/gandelf
 TARGET_TEST=test/test.o
 
-SRC=src/main.c src/file_map.c
+SRC=src/main.c src/utils.c src/parse_elf.c src/pretty_print.c
 SRC_TEST=test/test.c
 
 TRASH=src/*.o bin

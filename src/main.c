@@ -1,10 +1,11 @@
-#include "include/file_map.h"
+#include "include/utils.h"
+#include "include/pretty_print.h"
 
 #include <stdio.h>
 
 #define TARGET "dizzy"
 
-int main(int argc, char *argv[])
+int main(int argc, char **argv)
 {
     if (argc != 2)
     {
@@ -21,8 +22,8 @@ int main(int argc, char *argv[])
     }
 
     printf("[+] Ready to start working on %s!\n", target_bin);
-    printf("[+] Info on %s:\n\t=> Size: %lu bytes\n\t=> fd: %d\n", target_bin,
-           f->size, f->fd);
+
+    print_headers(f);
 
     file_unmap(&f);
 
