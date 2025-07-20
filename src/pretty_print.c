@@ -3,6 +3,19 @@
 #include <elf.h>
 #include <stdio.h>
 
+static void print_target_sys(Elf64_Ehdr *hdr);
+static void print_arch(Elf64_Ehdr *hdr);
+static void print_ftype(Elf64_Ehdr *hdr);
+
+void print_headers(const struct file *f)
+{
+    Elf64_Ehdr *hdr = (Elf64_Ehdr *)f->content;
+    puts("---------- File headers ----------");
+    print_arch(hdr);
+    print_target_sys(hdr);
+    print_ftype(hdr);
+}
+
 static void print_target_sys(Elf64_Ehdr *hdr)
 {
     printf("Target system:\t");
@@ -53,9 +66,27 @@ static void print_arch(Elf64_Ehdr *hdr)
     printf("\n");
 }
 
-void print_headers(const struct file *f)
+static void print_ftype(Elf64_Ehdr *hdr)
 {
-    Elf64_Ehdr *hdr = (Elf64_Ehdr *)f->content;
-    print_arch(hdr);
-    print_target_sys(hdr);
+    printf("Type:\t\t");
+    switch (hdr->e_type)
+    {
+    case ET_REL:
+        printf("Relocatable file");
+        break;
+    case ET_EXEC:
+        printf("Executable file");
+        break;
+    case ET_DYN:
+        printf("Shared object");
+        break;
+    case ET_CORE:
+        printf("Core file");
+        break;
+    case ET_NONE:
+    default:
+        printf("?");
+        break;
+    }
+    printf("\n");
 }
