@@ -36,7 +36,16 @@ int main() {
 ```
 
 ## Project setup
-At the root, call ```make```, then execute the **dizzy** program at *./bin* like so ```./bin/dizzy <program_to_disassemble>```
+At the root, call 
+```bash
+make
+```
+
+, then execute the **gandelf** program at *./bin* like so 
+```bash
+./bin/gandelf <program_to_disassemble>
+```
+
 
 ## Authors
 Nathan Delmarche
