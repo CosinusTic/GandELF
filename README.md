@@ -1,5 +1,5 @@
 # Welcome 
-This project is a simple ELF disassembler written in C intended as a learning
+This project is a simple x86_64 ELF disassembler written in C intended as a learning
 experience in assembly, systems programming, linux binaries, and reverse 
 engineering.
 

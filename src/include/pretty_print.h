@@ -3,6 +3,9 @@
 
 #include "utils.h"
 
-void print_headers(const struct file *f);
+#include <elf.h>
+
+void print_Ehdr(Elf64_Ehdr *hdr);
+void print_Phdrs(void *buf, Elf64_Ehdr *ehdr);
 
 #endif /* !PRETTY_PRINT_H */
