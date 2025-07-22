@@ -5,8 +5,9 @@ engineering.
 
 The aim of the project is to re-form the assembly (x86) form an ELF binary, like so:
 
+## Aim
 Consider the following code:
-```
+```C
 int add(int a, int b) {
     return a + b;
 }
