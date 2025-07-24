@@ -30,12 +30,20 @@ int main(int argc, char **argv)
     }
 
     Elf64_Ehdr *ehdr = get_ehdr(f->content);
-    Elf64_Phdr *phdr = get_phdr(f->content, ehdr->e_phoff);
+    Elf64_Phdr *phdrs = get_phdrs(f->content, ehdr);
+    Elf64_Shdr *shdrs = get_shdrs(f->content, ehdr);
+
+    if (shdrs)
+        printf("Section headers parsed\n");
+    if (phdrs)
+        printf("Program headers parsed\n");
 
     print_Ehdr(ehdr);
     print_Phdrs(f->content, ehdr);
+    print_Shdrs(f->content, ehdr);
 
-    printf("Program header start address: %p\n", (void *)phdr);
+    printf("Program headers start address: %p\n", (void *)phdrs);
+    printf("Section headers start address: %p\n", (void *)shdrs);
 
     file_unmap(&f);
 

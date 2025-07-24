@@ -16,9 +16,16 @@ Elf64_Ehdr *get_ehdr(void *buf)
     return (Elf64_Ehdr *)buf;
 }
 
-Elf64_Phdr *get_phdr(void *buf, Elf64_Off offset)
+Elf64_Phdr *get_phdrs(void *buf, Elf64_Ehdr *hdr)
 {
-    void *phdr = (char *)buf + offset;
+    void *phdr = (char *)buf + hdr->e_phoff;
 
     return (Elf64_Phdr *)phdr;
+}
+
+Elf64_Shdr *get_shdrs(void *buf, Elf64_Ehdr *hdr)
+{
+    void *shdr = (char *)buf + hdr->e_shoff;
+
+    return (Elf64_Shdr *)shdr;
 }

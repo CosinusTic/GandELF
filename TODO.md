@@ -1,5 +1,6 @@
 ## TODO
 1- Parse ELF: Find .text section and symbol table.
+    - ELF symbol header table parsed, must get each symbol table now
 
 2- For each function symbol:
 

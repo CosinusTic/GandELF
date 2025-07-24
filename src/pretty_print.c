@@ -14,6 +14,8 @@ static void print_seg_flag(Elf64_Phdr *hdr);
 static void print_seg_type(Elf64_Phdr *hdr);
 static void print_Phdr(Elf64_Phdr *hdr);
 
+// Section headers
+
 void print_Ehdr(Elf64_Ehdr *hdr)
 {
     puts("---------- ELF headers ----------");
@@ -23,13 +25,33 @@ void print_Ehdr(Elf64_Ehdr *hdr)
     putchar('\n');
 }
 
+void print_Shdrs(void *buf, Elf64_Ehdr *ehdr)
+{
+    if (ehdr->e_shnum <= 0)
+        return;
+
+    puts("-------- Section headers --------");
+
+    Elf64_Half i = 0;
+    Elf64_Shdr *start = get_shdrs(buf, ehdr);
+    printf("%d entries\n", ehdr->e_shnum);
+    while (i < ehdr->e_shnum)
+    {
+        printf("Section %d\n", i);
+        printf("At memory:\t0x%08lx\n", start->sh_addr);
+        i++;
+    }
+}
+
 void print_Phdrs(void *buf, Elf64_Ehdr *ehdr)
 {
     if (ehdr->e_phnum <= 0)
         return;
+
     puts("-------- Program headers --------");
+
     Elf64_Half i = 0;
-    Elf64_Phdr *start = get_phdr(buf, ehdr->e_phoff);
+    Elf64_Phdr *start = get_phdrs(buf, ehdr);
     while (i < ehdr->e_phnum)
     {
         Elf64_Phdr *current = &start[i]; // Syntactic sugar
@@ -46,8 +68,8 @@ static void print_Phdr(Elf64_Phdr *hdr)
 {
     print_seg_flag(hdr);
     print_seg_type(hdr);
-    printf("\tSegment physical address:\t%p\n", (void *)hdr->p_paddr);
-    printf("\tSegment virtual address:\t%p\n", (void *)hdr->p_vaddr);
+    printf("\tSegment physical address:\t0x%08lx\n", hdr->p_paddr);
+    printf("\tSegment virtual address:\t0x%08lx\n", hdr->p_vaddr);
     printf("\tSegment disk size:\t\t%lu\n", hdr->p_filesz);
     printf("\tSegment memory size:\t\t%lu\n", hdr->p_memsz);
 }
