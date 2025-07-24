@@ -10,7 +10,8 @@ static void print_arch(Elf64_Ehdr *hdr);
 static void print_ftype(Elf64_Ehdr *hdr);
 
 // Program headers
-static void print_segment_flag(Elf64_Phdr *hdr);
+static void print_seg_flag(Elf64_Phdr *hdr);
+static void print_seg_type(Elf64_Phdr *hdr);
 static void print_Phdr(Elf64_Phdr *hdr);
 
 void print_Ehdr(Elf64_Ehdr *hdr)
@@ -19,6 +20,7 @@ void print_Ehdr(Elf64_Ehdr *hdr)
     print_arch(hdr);
     print_target_sys(hdr);
     print_ftype(hdr);
+    putchar('\n');
 }
 
 void print_Phdrs(void *buf, Elf64_Ehdr *ehdr)
@@ -33,18 +35,54 @@ void print_Phdrs(void *buf, Elf64_Ehdr *ehdr)
         Elf64_Phdr *current = &start[i]; // Syntactic sugar
         printf("%d\n", i + 1);
         print_Phdr(current);
+        puts("--");
         i++;
     }
+
+    putchar('\n');
 }
 
 static void print_Phdr(Elf64_Phdr *hdr)
 {
-    print_segment_flag(hdr);
+    print_seg_flag(hdr);
+    print_seg_type(hdr);
+    printf("\tSegment physical address:\t%p\n", (void *)hdr->p_paddr);
+    printf("\tSegment virtual address:\t%p\n", (void *)hdr->p_vaddr);
+    printf("\tSegment disk size:\t\t%lu\n", hdr->p_filesz);
+    printf("\tSegment memory size:\t\t%lu\n", hdr->p_memsz);
 }
 
-static void print_segment_flag(Elf64_Phdr *hdr)
+static void print_seg_type(Elf64_Phdr *hdr)
 {
-    printf("\tSegment flag:\t");
+    printf("\tSegment type:\t\t\t");
+    switch (hdr->p_type)
+    {
+    case PT_NULL:
+        printf("Unused");
+        break;
+    case PT_LOAD:
+        printf("Loadable");
+        break;
+    case PT_DYNAMIC:
+        printf("Dynamic linking");
+        break;
+    case PT_INTERP:
+        printf("Program interpreter");
+        break;
+    case PT_GNU_STACK:
+        printf("Exception handler");
+        break;
+    default:
+        printf("Other");
+        break;
+    }
+
+    putchar('\n');
+}
+
+static void print_seg_flag(Elf64_Phdr *hdr)
+{
+    printf("\tSegment flag:\t\t\t");
     switch (hdr->p_flags)
     {
     case PF_X:
@@ -60,6 +98,7 @@ static void print_segment_flag(Elf64_Phdr *hdr)
         printf("Unknown");
         break;
     }
+
     putchar('\n');
 }
 
@@ -110,7 +149,8 @@ static void print_arch(Elf64_Ehdr *hdr)
     default:
         printf("?");
     }
-    printf("\n");
+
+    putchar('\n');
 }
 
 static void print_ftype(Elf64_Ehdr *hdr)
@@ -135,5 +175,6 @@ static void print_ftype(Elf64_Ehdr *hdr)
         printf("?");
         break;
     }
-    printf("\n");
+
+    putchar('\n');
 }
