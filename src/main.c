@@ -3,6 +3,7 @@
 #include "include/pretty_print.h"
 
 #include <stdio.h>
+#include <stdlib.h>
 
 #define TARGET "dizzy"
 
@@ -41,9 +42,6 @@ int main(int argc, char **argv)
     print_Ehdr(ehdr);
     print_Phdrs(f->content, ehdr);
     print_Shdrs(f->content, ehdr);
-
-    printf("Program headers start address: %p\n", (void *)phdrs);
-    printf("Section headers start address: %p\n", (void *)shdrs);
 
     file_unmap(&f);
 

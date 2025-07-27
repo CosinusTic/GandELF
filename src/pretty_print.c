@@ -48,21 +48,14 @@ void print_Phdrs(void *buf, Elf64_Ehdr *ehdr)
     putchar('\n');
 }
 
-/* TODO: First loop to save important sections, init and free this
- */
-struct important_sections
-{
-    Elf64_Shdr *symtab;
-    Elf64_Shdr *strtab;
-    Elf64_Shdr *text;
-};
-
 void print_Shdrs(void *buf, Elf64_Ehdr *ehdr)
 {
     if (ehdr->e_shnum <= 0)
         return;
 
     puts("-------- Section headers --------");
+
+    struct impsec *sec = get_impsec(buf, ehdr);
 
     Elf64_Half i = 0;
     Elf64_Shdr *sh_start = get_shdrs(buf, ehdr);
@@ -72,8 +65,13 @@ void print_Shdrs(void *buf, Elf64_Ehdr *ehdr)
         Elf64_Shdr *sh_cur = (Elf64_Shdr *)ptr;
         printf("Section %d\n", i);
         if ((sh_cur->sh_flags & SHF_ALLOC) && sh_cur->sh_addr != 0x0)
-            // printf("0x%08lx\n", sh_cur->sh_addr);
+        {
             print_Shdr(sh_cur);
+            const char *shstrtab_data = (char *)buf + sec->strtab->sh_offset;
+            const char *secname = shstrtab_data + sh_cur->sh_name;
+            printf("Section name:\t%s\n", secname);
+        }
+
         else
             printf("Unmapped\n");
         puts("--");
@@ -84,9 +82,6 @@ void print_Shdrs(void *buf, Elf64_Ehdr *ehdr)
 static void print_Shdr(Elf64_Shdr *shdr)
 {
     printf("Virtual address:\t0x%08lx\n", shdr->sh_addr);
-    void *ptr = (void *)shdr->sh_addr;
-    Elf64_Section *sect = (Elf64_Section *)ptr;
-    char *
 }
 
 static void print_Phdr(Elf64_Phdr *phdr)
