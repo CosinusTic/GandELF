@@ -15,6 +15,7 @@ static void print_seg_type(Elf64_Phdr *hdr);
 static void print_Phdr(Elf64_Phdr *hdr);
 
 // Section headers
+static void print_Shdr(Elf64_Shdr *shdr);
 
 void print_Ehdr(Elf64_Ehdr *hdr)
 {
@@ -25,24 +26,6 @@ void print_Ehdr(Elf64_Ehdr *hdr)
     putchar('\n');
 }
 
-void print_Shdrs(void *buf, Elf64_Ehdr *ehdr)
-{
-    if (ehdr->e_shnum <= 0)
-        return;
-
-    puts("-------- Section headers --------");
-
-    Elf64_Half i = 0;
-    Elf64_Shdr *start = get_shdrs(buf, ehdr);
-    printf("%d entries\n", ehdr->e_shnum);
-    while (i < ehdr->e_shnum)
-    {
-        printf("Section %d\n", i);
-        printf("At memory:\t0x%08lx\n", start->sh_addr);
-        i++;
-    }
-}
-
 void print_Phdrs(void *buf, Elf64_Ehdr *ehdr)
 {
     if (ehdr->e_phnum <= 0)
@@ -51,12 +34,13 @@ void print_Phdrs(void *buf, Elf64_Ehdr *ehdr)
     puts("-------- Program headers --------");
 
     Elf64_Half i = 0;
-    Elf64_Phdr *start = get_phdrs(buf, ehdr);
+    Elf64_Phdr *ph_start = get_phdrs(buf, ehdr);
     while (i < ehdr->e_phnum)
     {
-        Elf64_Phdr *current = &start[i]; // Syntactic sugar
+        void *ptr = (char *)ph_start + i * ehdr->e_phentsize;
+        Elf64_Phdr *ph_cur = (Elf64_Phdr *)ptr;
         printf("%d\n", i + 1);
-        print_Phdr(current);
+        print_Phdr(ph_cur);
         puts("--");
         i++;
     }
@@ -64,20 +48,61 @@ void print_Phdrs(void *buf, Elf64_Ehdr *ehdr)
     putchar('\n');
 }
 
-static void print_Phdr(Elf64_Phdr *hdr)
+/* TODO: First loop to save important sections, init and free this
+ */
+struct important_sections
 {
-    print_seg_flag(hdr);
-    print_seg_type(hdr);
-    printf("\tSegment physical address:\t0x%08lx\n", hdr->p_paddr);
-    printf("\tSegment virtual address:\t0x%08lx\n", hdr->p_vaddr);
-    printf("\tSegment disk size:\t\t%lu\n", hdr->p_filesz);
-    printf("\tSegment memory size:\t\t%lu\n", hdr->p_memsz);
+    Elf64_Shdr *symtab;
+    Elf64_Shdr *strtab;
+    Elf64_Shdr *text;
+};
+
+void print_Shdrs(void *buf, Elf64_Ehdr *ehdr)
+{
+    if (ehdr->e_shnum <= 0)
+        return;
+
+    puts("-------- Section headers --------");
+
+    Elf64_Half i = 0;
+    Elf64_Shdr *sh_start = get_shdrs(buf, ehdr);
+    while (i < ehdr->e_shnum)
+    {
+        void *ptr = (char *)sh_start + i * ehdr->e_shentsize;
+        Elf64_Shdr *sh_cur = (Elf64_Shdr *)ptr;
+        printf("Section %d\n", i);
+        if ((sh_cur->sh_flags & SHF_ALLOC) && sh_cur->sh_addr != 0x0)
+            // printf("0x%08lx\n", sh_cur->sh_addr);
+            print_Shdr(sh_cur);
+        else
+            printf("Unmapped\n");
+        puts("--");
+        i++;
+    }
 }
 
-static void print_seg_type(Elf64_Phdr *hdr)
+static void print_Shdr(Elf64_Shdr *shdr)
+{
+    printf("Virtual address:\t0x%08lx\n", shdr->sh_addr);
+    void *ptr = (void *)shdr->sh_addr;
+    Elf64_Section *sect = (Elf64_Section *)ptr;
+    char *
+}
+
+static void print_Phdr(Elf64_Phdr *phdr)
+{
+    print_seg_flag(phdr);
+    print_seg_type(phdr);
+    printf("\tSegment physical address:\t0x%08lx\n", phdr->p_paddr);
+    printf("\tSegment virtual address:\t0x%08lx\n", phdr->p_vaddr);
+    printf("\tSegment disk size:\t\t%lu\n", phdr->p_filesz);
+    printf("\tSegment memory size:\t\t%lu\n", phdr->p_memsz);
+}
+
+static void print_seg_type(Elf64_Phdr *phdr)
 {
     printf("\tSegment type:\t\t\t");
-    switch (hdr->p_type)
+    switch (phdr->p_type)
     {
     case PT_NULL:
         printf("Unused");
@@ -102,10 +127,10 @@ static void print_seg_type(Elf64_Phdr *hdr)
     putchar('\n');
 }
 
-static void print_seg_flag(Elf64_Phdr *hdr)
+static void print_seg_flag(Elf64_Phdr *phdr)
 {
     printf("\tSegment flag:\t\t\t");
-    switch (hdr->p_flags)
+    switch (phdr->p_flags)
     {
     case PF_X:
         printf("Executable segment");
@@ -124,10 +149,10 @@ static void print_seg_flag(Elf64_Phdr *hdr)
     putchar('\n');
 }
 
-static void print_target_sys(Elf64_Ehdr *hdr)
+static void print_target_sys(Elf64_Ehdr *ehdr)
 {
     printf("Target system:\t");
-    switch (hdr->e_ident[EI_OSABI])
+    switch (ehdr->e_ident[EI_OSABI])
     {
     case ELFOSABI_NETBSD:
         printf("Net BSD");
@@ -157,10 +182,10 @@ static void print_target_sys(Elf64_Ehdr *hdr)
     putchar('\n');
 }
 
-static void print_arch(Elf64_Ehdr *hdr)
+static void print_arch(Elf64_Ehdr *ehdr)
 {
     printf("Architecture:\t");
-    switch (hdr->e_ident[EI_CLASS])
+    switch (ehdr->e_ident[EI_CLASS])
     {
     case ELFCLASS64:
         printf("x86_64");
@@ -175,10 +200,10 @@ static void print_arch(Elf64_Ehdr *hdr)
     putchar('\n');
 }
 
-static void print_ftype(Elf64_Ehdr *hdr)
+static void print_ftype(Elf64_Ehdr *ehdr)
 {
     printf("Type:\t\t");
-    switch (hdr->e_type)
+    switch (ehdr->e_type)
     {
     case ET_REL:
         printf("Relocatable file");
