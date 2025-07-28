@@ -35,6 +35,8 @@ int main() {
 
 ```
 
+The parsing of the Executable Header, program headers, and section headers is done too so it will probably behave like objdump.
+
 ## Project setup
 At the root, call 
 ```bash
@@ -45,7 +47,6 @@ make
 ```bash
 ./bin/gandelf <program_to_disassemble>
 ```
-
 
 ## Authors
 Nathan Delmarche

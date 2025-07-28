@@ -1,13 +1,10 @@
 ## TODO
-1- Parse ELF: Find .text section and symbol table.
-    - ELF symbol header table parsed, must get each symbol table now
+- Parse .text section, and for each symbol:
+    - Show the name
+    - Get code bytes from its offset/size.
+    - Disassemble
 
-2- For each function symbol:
-
-    Show the name (or generate one if stripped).
-
-    Get code bytes from its offset/size.
-
-    Disassemble using Capstone (or manually for extra pain).
-
-3- Print formatted disassembly.
+## Future developments:
+- Work on stripped binaries by detecting functions heuristically
+- Highlight security-sensitive areas (e.g., writable/executable sections)
+- Output annotated disassembly like IDA or Ghidra (e.g., comments, xrefs)
