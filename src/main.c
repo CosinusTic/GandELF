@@ -1,6 +1,7 @@
 #include "include/parse_elf.h"
 #include "include/utils.h"
 #include "include/pretty_print.h"
+#include "include/dump.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -43,7 +44,16 @@ int main(int argc, char **argv)
     print_Phdrs(f->content, ehdr);
     print_Shdrs(f->content, ehdr);
 
-    file_unmap(&f);
+    struct impsec *impsec = get_impsec(f->content, ehdr);
 
+    unsigned char *textsec_ptr =
+        (unsigned char *)f->content + impsec->text->sh_offset;
+    size_t textsec_size = impsec->text->sh_size;
+
+    printf(".text\t%p\t%zu bytes\n", (void *)textsec_ptr, textsec_size);
+    hexdump(textsec_ptr, textsec_size);
+
+    free(impsec);
+    file_unmap(&f);
     return 0;
 }

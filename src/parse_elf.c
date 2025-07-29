@@ -3,6 +3,7 @@
 
 #include <elf.h>
 #include <stdlib.h>
+#include <string.h>
 
 int is_elf(const struct file *f)
 {
@@ -44,24 +45,24 @@ struct impsec *get_impsec(void *buf, Elf64_Ehdr *ehdr)
 
     Elf64_Half i = 0;
     Elf64_Shdr *sh_start = get_shdrs(buf, ehdr);
+    char *shstrtab = (char *)buf + sh_start[ehdr->e_shstrndx].sh_offset;
     while (i < ehdr->e_shnum)
     {
         void *ptr = (char *)sh_start + i * ehdr->e_shentsize;
         Elf64_Shdr *sh_cur = (Elf64_Shdr *)ptr;
-        switch (sh_cur->sh_type)
-        {
-        case SHT_SYMTAB:
-            sec->symtab = sh_cur;
-            break;
-        case SHT_PROGBITS:
+
+        const char *section_name = shstrtab + sh_cur->sh_name;
+
+        if (sh_cur->sh_type == SHT_PROGBITS
+            && (sh_cur->sh_flags & SHF_EXECINSTR)
+            && strcmp(section_name, ".text") == 0)
             sec->text = sh_cur;
-            break;
-        case SHT_STRTAB:
+
+        if (sh_cur->sh_type == SHT_SYMTAB)
+            sec->symtab = sh_cur;
+
+        if (sh_cur->sh_type == SHT_STRTAB)
             sec->strtab = sh_cur;
-            break;
-        default:
-            break;
-        }
 
         i++;
     }
