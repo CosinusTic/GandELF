@@ -1,11 +1,8 @@
 ## TODO
-- Parse .text section, and for each symbol:
-    - Show the name
-    - Get code bytes from its offset/size.
-    - Parse the symbol table to extract function names and offsets.
-    - Match .symtab entries with .text addresses and disassemble per symbol.
-    - Decode opcodes & disassemble
+- Parse .text section
+    - Get parsed sections into a linked list (each symbol with fields address, size, and name)
 
+- Parse opcode manually for each section
 ```asm
 <function_name>:
   0x401000:   mov eax, 1
