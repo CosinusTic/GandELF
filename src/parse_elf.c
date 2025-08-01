@@ -59,11 +59,12 @@ struct impsec *get_impsec(void *buf, Elf64_Ehdr *ehdr)
             sec->text = sh_cur;
 
         if (sh_cur->sh_type == SHT_SYMTAB)
+        {
             sec->symtab = sh_cur;
 
-        if (sh_cur->sh_type == SHT_STRTAB)
-            sec->strtab = sh_cur;
-
+            if (sh_cur->sh_link < ehdr->e_shnum)
+                sec->strtab = &sh_start[sh_cur->sh_link];
+        }
         i++;
     }
 

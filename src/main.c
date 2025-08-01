@@ -7,6 +7,47 @@
 
 #define TARGET "dizzy"
 
+#include <elf.h>
+#include <stdio.h>
+
+void print_symbols_in_text(void *buf, struct impsec *impsec, size_t text_index)
+{
+    if (!impsec->symtab || !impsec->strtab || !impsec->text)
+    {
+        puts("[-] Required sections (.symtab, .strtab, .text) missing");
+        return;
+    }
+
+    Elf64_Sym *symtab = (Elf64_Sym *)((char *)buf + impsec->symtab->sh_offset);
+    size_t sym_count = impsec->symtab->sh_size / sizeof(Elf64_Sym);
+
+    const char *strtab = (const char *)buf + impsec->strtab->sh_offset;
+
+    printf("[*] Listing function symbols in .text:\n");
+
+    for (size_t i = 0; i < sym_count; i++)
+    {
+        Elf64_Sym *sym = &symtab[i];
+
+        if (sym->st_name == 0)
+            continue; // unnamed
+
+        if (ELF64_ST_TYPE(sym->st_info) != STT_FUNC)
+            continue; // not a function
+
+        if (sym->st_shndx != text_index)
+            continue; // not in .text
+
+        const char *name = strtab + sym->st_name;
+
+        printf(" - %s:\n", name);
+        printf("\taddress: 0x%lx\n", sym->st_value);
+        printf("\tsize:    %lu bytes\n", sym->st_size);
+        printf("\tentsize: %lu bytes\n",
+               sym->st_size); // entsize often same as size
+    }
+}
+
 int main(int argc, char **argv)
 {
     if (argc != 2)
@@ -50,7 +91,8 @@ int main(int argc, char **argv)
         file_unmap(&f);
         return 1;
     }
-    struct sec *sec = NULL;
+    size_t text_index = impsec->text - shdrs; // Calculate .text's index
+    struct sec *text_sec = NULL;
 
     if (!impsec->text)
     {
@@ -60,11 +102,12 @@ int main(int argc, char **argv)
         return 1;
     }
 
-    sec = sec_resolve(f, impsec->text);
+    text_sec = sec_resolve(f, impsec->text);
 
-    printf(".text\t%p\t%zu bytes\n", sec->addr, sec->size);
-    hexdump(sec->addr, sec->size);
+    printf(".text\t%p\t%zu bytes\n", text_sec->addr, text_sec->size);
+    hexdump(text_sec->addr, text_sec->size);
 
+    print_symbols_in_text(f->content, impsec, text_index);
     // unsigned char *textsec_ptr =
     //     (unsigned char *)f->content + impsec->text->sh_offset;
     // size_t textsec_size = impsec->text->sh_size;
@@ -73,7 +116,7 @@ int main(int argc, char **argv)
     // hexdump(textsec_ptr, textsec_size);
 
     free(impsec);
-    free(sec);
+    free(text_sec);
     file_unmap(&f);
     return 0;
 }
