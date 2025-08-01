@@ -7,7 +7,7 @@ TARGET=bin/gandelf
 TARGET_TEST=test/test.o
 TARGET_TEST_BIN=test/test
 
-SRC=src/main.c src/utils.c src/parse_elf.c src/pretty_print.c src/dump.c
+SRC=src/main.c src/utils.c src/parse_elf.c src/pretty_print.c
 SRC_TEST=test/test.c
 
 TRASH=src/*.o bin

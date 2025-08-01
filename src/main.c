@@ -1,7 +1,6 @@
 #include "include/parse_elf.h"
 #include "include/utils.h"
 #include "include/pretty_print.h"
-#include "include/dump.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -45,15 +44,36 @@ int main(int argc, char **argv)
     print_Shdrs(f->content, ehdr);
 
     struct impsec *impsec = get_impsec(f->content, ehdr);
+    if (!impsec)
+    {
+        puts("[-] Failed to extract important sections");
+        file_unmap(&f);
+        return 1;
+    }
+    struct sec *sec = NULL;
 
-    unsigned char *textsec_ptr =
-        (unsigned char *)f->content + impsec->text->sh_offset;
-    size_t textsec_size = impsec->text->sh_size;
+    if (!impsec->text)
+    {
+        puts("[-] No .text section found");
+        free(impsec);
+        file_unmap(&f);
+        return 1;
+    }
 
-    printf(".text\t%p\t%zu bytes\n", (void *)textsec_ptr, textsec_size);
-    hexdump(textsec_ptr, textsec_size);
+    sec = sec_resolve(f, impsec->text);
+
+    printf(".text\t%p\t%zu bytes\n", sec->addr, sec->size);
+    hexdump(sec->addr, sec->size);
+
+    // unsigned char *textsec_ptr =
+    //     (unsigned char *)f->content + impsec->text->sh_offset;
+    // size_t textsec_size = impsec->text->sh_size;
+
+    // printf(".text\t%p\t%zu bytes\n", (void *)textsec_ptr, textsec_size);
+    // hexdump(textsec_ptr, textsec_size);
 
     free(impsec);
+    free(sec);
     file_unmap(&f);
     return 0;
 }

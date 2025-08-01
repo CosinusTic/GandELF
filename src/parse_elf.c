@@ -69,3 +69,18 @@ struct impsec *get_impsec(void *buf, Elf64_Ehdr *ehdr)
 
     return sec;
 }
+
+struct sec *sec_resolve(struct file *f, Elf64_Shdr *shdr)
+{
+    if (!shdr)
+        return NULL;
+
+    struct sec *sec = malloc(sizeof(struct sec));
+    if (!sec)
+        return NULL;
+
+    sec->addr = (void *)f->content + shdr->sh_offset;
+    sec->size = shdr->sh_size;
+
+    return sec;
+}

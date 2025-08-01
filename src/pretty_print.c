@@ -79,6 +79,20 @@ void print_Shdrs(void *buf, Elf64_Ehdr *ehdr)
     }
 }
 
+// Dump memory byte by byte in hex format
+void hexdump(unsigned char *ptr, size_t size)
+{
+    for (size_t i = 0; i < size; i++)
+    {
+        printf("0x%02x", ptr[i]);
+        if (i % 10 == 0 && i != 0)
+            putchar('\n');
+        else
+            putchar('\t');
+    }
+    putchar('\n');
+}
+
 static void print_Shdr(Elf64_Shdr *shdr)
 {
     printf("Virtual address:\t0x%08lx\n", shdr->sh_addr);
