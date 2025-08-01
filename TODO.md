@@ -17,3 +17,5 @@
 - Work on stripped binaries by detecting functions heuristically
 - Highlight security-sensitive areas (e.g., writable/executable sections)
 - Output annotated disassembly like IDA or Ghidra (e.g., comments, xrefs)
+
+CPU instructions REF: http://ref.x86asm.net/coder64.html#x00
