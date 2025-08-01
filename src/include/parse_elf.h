@@ -16,6 +16,8 @@ struct sec // A custom struct representing a given section
 {
     void *addr;
     size_t size;
+    size_t entsize;
+    const char *secname;
 };
 
 int is_elf(const struct file *f);

@@ -3,6 +3,8 @@
 
 #include <elf.h>
 #include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 
 // ELF header
 static void print_target_sys(Elf64_Ehdr *hdr);
@@ -92,6 +94,30 @@ void hexdump(unsigned char *ptr, size_t size)
     }
     putchar('\n');
 }
+
+// void print_symtab(struct sec *symtab, struct sec *strtab)
+// {
+//     if (!symtab || !strtab || !symtab->addr || !strtab->addr)
+//         return;
+//
+//     printf("Function Symbols:\n");
+//
+//     size_t offset = 0;
+//     while (offset + sizeof(Elf64_Sym) <= symtab->size)
+//     {
+//         Elf64_Sym *sym = (Elf64_Sym *)((char *)symtab->addr + offset);
+//
+//         // Check if it's a function symbol with a valid size
+//         if (ELF64_ST_TYPE(sym->st_info) == STT_FUNC && sym->st_size > 0)
+//         {
+//             const char *name = (const char *)strtab->addr + sym->st_name;
+//             printf(" - %s at 0x%lx (%lu bytes)\n", name, sym->st_value,
+//                    sym->st_size);
+//         }
+//
+//         offset += symtab->entsize;
+//     }
+// }
 
 static void print_Shdr(Elf64_Shdr *shdr)
 {

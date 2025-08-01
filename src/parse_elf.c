@@ -79,8 +79,9 @@ struct sec *sec_resolve(struct file *f, Elf64_Shdr *shdr)
     if (!sec)
         return NULL;
 
-    sec->addr = (void *)f->content + shdr->sh_offset;
+    sec->addr = (void *)((char *)f->content + shdr->sh_offset);
     sec->size = shdr->sh_size;
+    sec->entsize = shdr->sh_entsize;
 
     return sec;
 }
