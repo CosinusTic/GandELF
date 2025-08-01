@@ -33,7 +33,7 @@ Elf64_Shdr *get_shdrs(void *buf, Elf64_Ehdr *hdr)
     return (Elf64_Shdr *)shdr;
 }
 
-// Get the important sections (.text, .symtab, .strtab)
+// Get the .text, .symtab, .strtab sections
 struct impsec *get_impsec(void *buf, Elf64_Ehdr *ehdr)
 {
     if (ehdr->e_shnum <= 0)
