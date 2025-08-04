@@ -5,7 +5,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-#define TARGET "dizzy"
+#define TARGET "gandelf"
 
 #include <elf.h>
 #include <stdio.h>
