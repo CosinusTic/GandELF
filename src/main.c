@@ -10,7 +10,7 @@
 #include <elf.h>
 #include <stdio.h>
 
-void print_symbols_in_text(void *buf, struct impsec *impsec, size_t text_index)
+void print_symbols(void *buf, struct impsec *impsec, size_t text_index)
 {
     if (!impsec->symtab || !impsec->strtab || !impsec->text)
     {
@@ -23,28 +23,29 @@ void print_symbols_in_text(void *buf, struct impsec *impsec, size_t text_index)
 
     const char *strtab = (const char *)buf + impsec->strtab->sh_offset;
 
-    printf("[*] Listing function symbols in .text:\n");
+    printf("\n\n[*] Listing function symbols in .text:\n\n");
 
     for (size_t i = 0; i < sym_count; i++)
     {
         Elf64_Sym *sym = &symtab[i];
 
         if (sym->st_name == 0)
-            continue; // unnamed
-
+            continue;
         if (ELF64_ST_TYPE(sym->st_info) != STT_FUNC)
-            continue; // not a function
-
+            continue;
         if (sym->st_shndx != text_index)
-            continue; // not in .text
+            continue;
 
         const char *name = strtab + sym->st_name;
 
-        printf(" - %s:\n", name);
-        printf("\taddress: 0x%lx\n", sym->st_value);
-        printf("\tsize:    %lu bytes\n", sym->st_size);
-        printf("\tentsize: %lu bytes\n",
-               sym->st_size); // entsize often same as size
+        size_t sym_off = sym->st_value
+            - impsec->text->sh_addr; // Offset of the function within .text
+        size_t off = impsec->text->sh_offset + sym_off;
+        unsigned char *fun_ptr = (unsigned char *)buf + off;
+
+        printf("0x%016lx <%s> (%lu bytes):\n", sym->st_value, name,
+               sym->st_size);
+        hexdump(fun_ptr, sym->st_size);
     }
 }
 
@@ -107,13 +108,7 @@ int main(int argc, char **argv)
     printf(".text\t%p\t%zu bytes\n", text_sec->addr, text_sec->size);
     hexdump(text_sec->addr, text_sec->size);
 
-    print_symbols_in_text(f->content, impsec, text_index);
-    // unsigned char *textsec_ptr =
-    //     (unsigned char *)f->content + impsec->text->sh_offset;
-    // size_t textsec_size = impsec->text->sh_size;
-
-    // printf(".text\t%p\t%zu bytes\n", (void *)textsec_ptr, textsec_size);
-    // hexdump(textsec_ptr, textsec_size);
+    print_symbols(f->content, impsec, text_index);
 
     free(impsec);
     free(text_sec);
