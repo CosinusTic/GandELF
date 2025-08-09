@@ -4,48 +4,103 @@
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <elf.h>
+#include <stdio.h>
+#include <string.h>
 
 #define TARGET "gandelf"
 
-#include <elf.h>
-#include <stdio.h>
-
-void print_symbols(void *buf, struct impsec *impsec, size_t text_index)
+static char *xstrdup(const char *s)
 {
-    if (!impsec->symtab || !impsec->strtab || !impsec->text)
-    {
-        puts("[-] Required sections (.symtab, .strtab, .text) missing");
-        return;
-    }
+    size_t n = strlen(s) + 1;
+    char *p = malloc(n);
+    if (p)
+        memcpy(p, s, n);
+    return p;
+}
+
+struct sym_info
+{
+    char *name;
+    Elf64_Addr addr;
+    size_t size;
+    unsigned char *bytes;
+};
+
+struct sym_list
+{
+    struct sym_info *items;
+    size_t count;
+};
+
+struct sym_list get_text_funcs(void *buf, struct impsec *impsec,
+                               size_t text_index, size_t file_size)
+{
+    struct sym_list out = { 0 };
+    if (!impsec || !impsec->strtab || !impsec->symtab || !impsec->text)
+        return out;
 
     Elf64_Sym *symtab = (Elf64_Sym *)((char *)buf + impsec->symtab->sh_offset);
     size_t sym_count = impsec->symtab->sh_size / sizeof(Elf64_Sym);
-
     const char *strtab = (const char *)buf + impsec->strtab->sh_offset;
+    Elf64_Shdr *text = impsec->text;
 
-    printf("\n\n[*] Listing function symbols in .text:\n\n");
-
+    size_t fun_count = 0;
     for (size_t i = 0; i < sym_count; i++)
     {
-        Elf64_Sym *sym = &symtab[i];
+        Elf64_Sym *s = &symtab[i];
+        if (s->st_name && ELF64_ST_TYPE(s->st_info) == STT_FUNC
+            && s->st_shndx == text_index)
+            fun_count++;
+    }
+    if (fun_count == 0)
+        return out;
 
-        if (sym->st_name == 0)
+    struct sym_info *funcs = calloc(fun_count, sizeof(*funcs));
+    if (!funcs)
+        return out;
+
+    size_t j = 0;
+    for (size_t i = 0; i < sym_count; i++)
+    {
+        Elf64_Sym *s = &symtab[i];
+        if (!(s->st_name && ELF64_ST_TYPE(s->st_info) == STT_FUNC
+              && s->st_shndx == text_index))
             continue;
-        if (ELF64_ST_TYPE(sym->st_info) != STT_FUNC)
+
+        size_t sym_off = (size_t)(s->st_value - text->sh_addr);
+        size_t off = (size_t)text->sh_offset + sym_off;
+
+        // bounds check
+        if (off > file_size || (s->st_size && off + s->st_size > file_size))
             continue;
-        if (sym->st_shndx != text_index)
-            continue;
 
-        const char *name = strtab + sym->st_name;
+        funcs[j].name = xstrdup(strtab + s->st_name);
+        if (!funcs[j].name)
+        { /* handle OOM if you want */
+        }
+        funcs[j].addr = s->st_value;
+        funcs[j].size = s->st_size;
+        funcs[j].bytes = (unsigned char *)buf + off;
+        j++;
+    }
 
-        size_t sym_off = sym->st_value
-            - impsec->text->sh_addr; // Offset of the function within .text
-        size_t off = impsec->text->sh_offset + sym_off;
-        unsigned char *fun_ptr = (unsigned char *)buf + off;
+    out.items = funcs;
+    out.count = j; // may be <= fun_count if some failed bounds
+    return out;
+}
 
-        printf("0x%016lx <%s> (%lu bytes):\n", sym->st_value, name,
-               sym->st_size);
-        hexdump(fun_ptr, sym->st_size);
+void print_text_funcs(const struct sym_list *lst)
+{
+    puts(".text functions:");
+    for (size_t i = 0; i < lst->count; i++)
+    {
+        const struct sym_info *f = &lst->items[i];
+        printf("\n\tAddr:\t0x%016llx\n\tname:\t%s\n\tsize:\t%zu\n",
+               (unsigned long long)f->addr, f->name ? f->name : "(null)",
+               f->size);
+        // hexdump(unsigned char *ptr, size_t size);
+        hexdump(f->bytes, f->size);
     }
 }
 
@@ -108,7 +163,13 @@ int main(int argc, char **argv)
     printf(".text\t%p\t%zu bytes\n", text_sec->addr, text_sec->size);
     hexdump(text_sec->addr, text_sec->size);
 
-    print_symbols(f->content, impsec, text_index);
+    struct sym_list lst =
+        get_text_funcs(f->content, impsec, text_index, f->size);
+    print_text_funcs(&lst);
+
+    for (size_t i = 0; i < lst.count; i++)
+        free(lst.items[i].name);
+    free(lst.items);
 
     free(impsec);
     free(text_sec);
