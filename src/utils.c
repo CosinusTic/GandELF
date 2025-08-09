@@ -74,3 +74,12 @@ void file_unmap(struct file **f)
     free(*f);
     *f = NULL;
 }
+
+char *xstrdup(const char *s) // -std=c99 flag
+{
+    size_t n = strlen(s) + 1;
+    char *p = malloc(n);
+    if (p)
+        memcpy(p, s, n);
+    return p;
+}

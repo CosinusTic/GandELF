@@ -86,3 +86,60 @@ struct sec *sec_resolve(struct file *f, Elf64_Shdr *shdr)
 
     return sec;
 }
+
+struct sym_list get_text_funcs(void *buf, struct impsec *impsec,
+                               size_t text_index, size_t file_size)
+{
+    struct sym_list out = { 0 };
+    if (!impsec || !impsec->strtab || !impsec->symtab || !impsec->text)
+        return out;
+
+    Elf64_Sym *symtab = (Elf64_Sym *)((char *)buf + impsec->symtab->sh_offset);
+    size_t sym_count = impsec->symtab->sh_size / sizeof(Elf64_Sym);
+    const char *strtab = (const char *)buf + impsec->strtab->sh_offset;
+    Elf64_Shdr *text = impsec->text;
+
+    size_t fun_count = 0;
+    for (size_t i = 0; i < sym_count; i++)
+    {
+        Elf64_Sym *s = &symtab[i];
+        if (s->st_name && ELF64_ST_TYPE(s->st_info) == STT_FUNC
+            && s->st_shndx == text_index)
+            fun_count++;
+    }
+    if (fun_count == 0)
+        return out;
+
+    struct sym_info *funcs = calloc(fun_count, sizeof(*funcs));
+    if (!funcs)
+        return out;
+
+    size_t j = 0;
+    for (size_t i = 0; i < sym_count; i++)
+    {
+        Elf64_Sym *s = &symtab[i];
+        if (!(s->st_name && ELF64_ST_TYPE(s->st_info) == STT_FUNC
+              && s->st_shndx == text_index))
+            continue;
+
+        size_t sym_off = (size_t)(s->st_value - text->sh_addr);
+        size_t off = (size_t)text->sh_offset + sym_off;
+
+        // bounds check
+        if (off > file_size || (s->st_size && off + s->st_size > file_size))
+            continue;
+
+        funcs[j].name = xstrdup(strtab + s->st_name);
+        if (!funcs[j].name)
+        { /* handle OOM if you want */
+        }
+        funcs[j].addr = s->st_value;
+        funcs[j].size = s->st_size;
+        funcs[j].bytes = (unsigned char *)buf + off;
+        j++;
+    }
+
+    out.items = funcs;
+    out.count = j; // may be <= fun_count if some failed bounds
+    return out;
+}

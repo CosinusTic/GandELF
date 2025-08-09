@@ -95,6 +95,19 @@ void hexdump(unsigned char *ptr, size_t size)
     putchar('\n');
 }
 
+void print_text_funcs(const struct sym_list *lst)
+{
+    puts(".text functions:");
+    for (size_t i = 0; i < lst->count; i++)
+    {
+        const struct sym_info *f = &lst->items[i];
+        printf("\n\tAddr:\t0x%016llx\n\tname:\t%s\n\tsize:\t%zu\n",
+               (unsigned long long)f->addr, f->name ? f->name : "(null)",
+               f->size);
+        hexdump(f->bytes, f->size);
+    }
+}
+
 static void print_Shdr(Elf64_Shdr *shdr)
 {
     printf("Virtual address:\t0x%08lx\n", shdr->sh_addr);

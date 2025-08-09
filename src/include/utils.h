@@ -13,5 +13,6 @@ struct file
 
 struct file *file_map(const char *filename);
 void file_unmap(struct file **file);
+char *xstrdup(const char *s);
 
 #endif
