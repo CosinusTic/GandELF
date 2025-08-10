@@ -11,7 +11,7 @@ TARGET = $(BIN_DIR)/gandelf
 TARGET_TEST = $(TEST_DIR)/test
 OBJ = $(SRC:.c=.o)
 
-SRC = $(SRC_DIR)/main.c $(SRC_DIR)/utils.c $(SRC_DIR)/parse_elf.c $(SRC_DIR)/pretty_print.c
+SRC = $(SRC_DIR)/main.c $(SRC_DIR)/utils.c $(SRC_DIR)/parse_elf.c $(SRC_DIR)/pretty_print.c $(SRC_DIR)/disas.c
 OBJS = $(SRC:.c=.o)
 TEST_SRC = $(TEST_DIR)/test.c
 

@@ -2,7 +2,8 @@
 #define DISAS_H
 
 #include <stddef.h>
+#include <inttypes.h>
 
-void parse_opcodes(const char *ptr, size_t remaining);
+void disas(const uint8_t *ptr, size_t remaining);
 
 #endif /* !DISAS_H */

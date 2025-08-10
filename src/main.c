@@ -1,6 +1,7 @@
 #include "include/parse_elf.h"
 #include "include/utils.h"
 #include "include/pretty_print.h"
+#include "include/disas.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -73,11 +74,11 @@ int main(int argc, char **argv)
         get_text_funcs(f->content, impsec, text_index, f->size);
     print_text_funcs(&lst);
 
-    // for (size_t i = 0; i < lst.count; i++)
-    //     free(lst.items[i].name);
-    // free(lst.items);
-    free_symlist(lst);
+    struct sym_info *sym = lst.items;
+    printf("x86 ASM for symbol: %s\n", sym->name);
+    disas((uint8_t *)sym->bytes, sym->size);
 
+    free_symlist(lst);
     free(impsec);
     free(text_sec);
     file_unmap(&f);
