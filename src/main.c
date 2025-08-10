@@ -73,9 +73,10 @@ int main(int argc, char **argv)
         get_text_funcs(f->content, impsec, text_index, f->size);
     print_text_funcs(&lst);
 
-    for (size_t i = 0; i < lst.count; i++)
-        free(lst.items[i].name);
-    free(lst.items);
+    // for (size_t i = 0; i < lst.count; i++)
+    //     free(lst.items[i].name);
+    // free(lst.items);
+    free_symlist(lst);
 
     free(impsec);
     free(text_sec);

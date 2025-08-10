@@ -75,6 +75,13 @@ void file_unmap(struct file **f)
     *f = NULL;
 }
 
+void free_symlist(struct sym_list l)
+{
+    for (size_t i = 0; i < l.count; i++)
+        free(l.items[i].name);
+    free(l.items);
+}
+
 char *xstrdup(const char *s) // -std=c99 flag
 {
     size_t n = strlen(s) + 1;
