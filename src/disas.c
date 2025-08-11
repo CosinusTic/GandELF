@@ -1,9 +1,11 @@
 #include "include/disas.h"
-#include <inttypes.h>
+#include "include/opcodes.h"
 
 #include <stdio.h>
 #include <stdbool.h>
 #include <string.h>
+#include <inttypes.h>
+#include <stdlib.h>
 
 /*
  * 0F: whether the opcode map is two-byte (starts with 0x0F). If yes, you must
@@ -60,6 +62,12 @@ Immediate(s) (0+ bytes):
 --
 */
 
+// Readability constants for modrm types
+#define N 0 // MODRM_NONE
+#define R 1 // MODRM_REG
+#define D 2 // MODRM_DIGIT
+#define G(x) (x) // digit group
+
 struct asm_ins
 {
     bool has_66, has_67; // Operand or memory size override
@@ -74,28 +82,10 @@ struct asm_ins
     int disp_size; // Displacement size
     int imm_size; // Size of immediates if any
     int op_size; // 16/32/64
+    uint8_t modrm_kind;
 };
 
-struct op_modrm_map // Mapping of has_modrm flags for primary opcodes
-{
-    uint8_t opcode;
-    bool has_modrm;
-};
-
-static const struct op_modrm_map prim_op_modrm_map[] = {
-    { 0x00, true }, { 0x01, true }, { 0x02, true }, { 0x03, true },
-    { 0x08, true }, { 0x09, true }, { 0x0A, true }, { 0x0B, true },
-    { 0x10, true }, { 0x11, true }, { 0x12, true }, { 0x13, true },
-    { 0x18, true }, { 0x19, true }, { 0x1A, true }, { 0x1B, true },
-    { 0x20, true }, { 0x21, true }, { 0x22, true }, { 0x23, true },
-    { 0x28, true }, { 0x29, true }, { 0x2A, true }, { 0x2B, true },
-    { 0x38, true }, { 0x39, true }, { 0x3A, true }, { 0x3B, true },
-    { 0x63, true }, { 0x69, true }, { 0x6B, true }, { 0x84, true },
-    { 0x85, true }, { 0x86, true }, { 0x87, true }, { 0x88, true },
-    { 0x89, true }, { 0x8A, true }, { 0x8B, true }, { 0x8C, true },
-    { 0x8D, true }, { 0x8E, true },
-    // TODO: Check if enough
-};
+// for 1 byte mappings that have /r modrm
 
 // TODO: add 2-3 byte maps has_modrm mapping
 /*
@@ -105,15 +95,21 @@ static const struct op_modrm_map prim_op_modrm_map[] = {
 --
 */
 
-static bool primary_has_modrm(uint8_t op)
+static struct opcode_info get_opcode_info(uint8_t op, uint8_t map)
 {
-    for (size_t i = 0;
-         i < sizeof(prim_op_modrm_map) / sizeof(prim_op_modrm_map[0]); i++)
+    switch (map)
     {
-        if (prim_op_modrm_map[i].opcode == op)
-            return prim_op_modrm_map[i].has_modrm;
+    case 1:
+        return modrm_prim_map[op];
+    case 0x0F:
+        return modrm_0f_map[op];
+    case 0x38:
+        return modrm_0f38_map[op];
+    case 0x3A:
+        return modrm_0f3a_map[op];
+    default:
+        return (struct opcode_info){ N, 0 };
     }
-    return false;
 }
 
 size_t decode64(const uint8_t *p, size_t max, struct asm_ins *_asm)
@@ -194,7 +190,9 @@ size_t decode64(const uint8_t *p, size_t max, struct asm_ins *_asm)
         _asm->op_size = 16;
 
     // TODO: Set has_modrm, fill imm_size
-    if (_asm->map == 1 && primary_has_modrm(_asm->op))
+    struct opcode_info opcode_info = get_opcode_info(_asm->op, _asm->map);
+    _asm->modrm_kind = opcode_info.modrm_kind;
+    if (opcode_info.modrm_kind != N)
     {
         if (p >= end)
             return 0;
@@ -215,7 +213,7 @@ size_t decode64(const uint8_t *p, size_t max, struct asm_ins *_asm)
         if (p >= end)
             return 0;
         uint8_t mod = _asm->modrm >> 6;
-        uint8_t reg = (_asm->modrm >> 3) & 7;
+        // uint8_t reg = (_asm->modrm >> 3) & 7;
         uint8_t rm = _asm->modrm & 7;
 
         if (mod != 3 && rm == 4) // Check for SIB
@@ -247,13 +245,27 @@ size_t decode64(const uint8_t *p, size_t max, struct asm_ins *_asm)
 }
 void disas(const uint8_t *ptr, size_t size)
 {
-    puts("Test parsing of bytes");
-
     const uint8_t *p = ptr;
     const uint8_t *end = ptr + size;
+    struct asm_ins _asm;
 
     while (p < end)
     {
-        // call disas to fill struct and
+        size_t num_bytes_parsed = decode64(p, (size_t)(end - p), &_asm);
+        if (num_bytes_parsed == 0)
+        {
+            puts("Error parsing bytes");
+            break;
+        }
+        printf("Bytes parsed: ");
+        for (size_t i = 0; i < num_bytes_parsed; i++)
+            printf("\t0x%02x", p[i]);
+        putchar('\n');
+
+        p += num_bytes_parsed;
+        printf("map=0x%X op=0x%X modrm_kind=%u has_modrm=%d modrm=0x%X "
+               "sib=0x%X disp_size=%d imm_size=%d op_size=%d\n\n",
+               _asm.map, _asm.op, _asm.modrm_kind, _asm.has_modrm, _asm.modrm,
+               _asm.sib, _asm.disp_size, _asm.imm_size, _asm.op_size);
     }
 }
