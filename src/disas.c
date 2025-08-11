@@ -6,13 +6,6 @@
 #include <string.h>
 
 /*
- * start from the left to first identify if it's a prefix, two byte, then 0x0f
- * refix, then primary opcode, etc Ex: start with prefix, layered finite-state
- * decoder, where each stage consumes as many bytes as it knows how to handle,
- * then hands off to the next stage
- */
-
-/*
  * 0F: whether the opcode map is two-byte (starts with 0x0F). If yes, you must
 read a second opcode byte; for 3-byte maps you’ll see 0F 38 or 0F 3A, etc.
 
@@ -67,19 +60,44 @@ Immediate(s) (0+ bytes):
 --
 */
 
-struct asm_instruction
+struct asm_ins
 {
-    bool has_66, has_67, lock, rep, repne;
+    bool has_66, has_67; // Operand or memory size override
+    bool lock; // Bus lock signal for multi-processing
+    bool rep, repne; // String handling loops
     uint8_t rex; // bits W R X B, expand SIB bytes, specify operand size and
                  // access r8-15
     uint8_t map; // 1, 2, or 3 bytes overall instruction size
     uint8_t op; // opcode
     uint8_t modrm, sib; // Operands encoding
-    bool has_modrm, has_sib;
-    int disp_size, imm_size;
+    bool has_modrm, has_sib; // Whether opcode has operands
+    int disp_size; // Displacement size
+    int imm_size; // Size of immediates if any
     int op_size; // 16/32/64
 };
 
+struct op_modrm_map // Mapping of has_modrm flags for primary opcodes
+{
+    uint8_t opcode;
+    bool has_modrm;
+};
+
+static const struct op_modrm_map prim_op_modrm_map[] = {
+    { 0x00, true }, { 0x01, true }, { 0x02, true }, { 0x03, true },
+    { 0x08, true }, { 0x09, true }, { 0x0A, true }, { 0x0B, true },
+    { 0x10, true }, { 0x11, true }, { 0x12, true }, { 0x13, true },
+    { 0x18, true }, { 0x19, true }, { 0x1A, true }, { 0x1B, true },
+    { 0x20, true }, { 0x21, true }, { 0x22, true }, { 0x23, true },
+    { 0x28, true }, { 0x29, true }, { 0x2A, true }, { 0x2B, true },
+    { 0x38, true }, { 0x39, true }, { 0x3A, true }, { 0x3B, true },
+    { 0x63, true }, { 0x69, true }, { 0x6B, true }, { 0x84, true },
+    { 0x85, true }, { 0x86, true }, { 0x87, true }, { 0x88, true },
+    { 0x89, true }, { 0x8A, true }, { 0x8B, true }, { 0x8C, true },
+    { 0x8D, true }, { 0x8E, true },
+    // TODO: Check if enough
+};
+
+// TODO: add 2-3 byte maps has_modrm mapping
 /*
 -- parsing order
 [prefixes] -> [0F?/map] -> [opcode byte] -> [ModR/M? -> SIB? -> disp?] ->
@@ -87,11 +105,22 @@ struct asm_instruction
 --
 */
 
-size_t decode64(const uint8_t *p, size_t max, struct asm_instruction *_asm)
+static bool primary_has_modrm(uint8_t op)
+{
+    for (size_t i = 0;
+         i < sizeof(prim_op_modrm_map) / sizeof(prim_op_modrm_map[0]); i++)
+    {
+        if (prim_op_modrm_map[i].opcode == op)
+            return prim_op_modrm_map[i].has_modrm;
+    }
+    return false;
+}
+
+size_t decode64(const uint8_t *p, size_t max, struct asm_ins *_asm)
 {
     const uint8_t *start = p;
     const uint8_t *end = p + max;
-    memset(_asm, 0, sizeof(struct asm_instruction));
+    memset(_asm, 0, sizeof(struct asm_ins));
 
     // Get prefixes
     while (1)
@@ -159,66 +188,72 @@ size_t decode64(const uint8_t *p, size_t max, struct asm_instruction *_asm)
 
     // Get operand size
     _asm->op_size = 32;
-    if ((_asm->rex & 0x08)
-        == 0x01) // check that xxxx xxxx & 1111 1111 = 0000 0001
+    if (_asm->rex & 0x08) // Check that xxxx xxxx & 0000 1000 =! 0000 0000
         _asm->op_size = 64;
-    else if ((_asm->rex & 0x08) == 0x01 && _asm->has_66)
+    else if (_asm->has_66)
         _asm->op_size = 16;
 
-    // TODO: Set has_modrm, imm_size
-    if ()
-
-        return 0;
-}
-
-static const uint8_t *state_0x0f(const uint8_t *p);
-static const uint8_t *state_prim_opcode(uint8_t byte, const uint8_t *p);
-
-static const uint8_t *state_0x0f(const uint8_t *p)
-{
-    uint8_t byte = *p++;
-    return state_prim_opcode(byte, p);
-}
-
-static const uint8_t *state_prim_opcode(uint8_t byte, const uint8_t *p)
-{
-    printf("OPCODE");
-    if (byte <= 0x05)
+    // TODO: Set has_modrm, fill imm_size
+    if (_asm->map == 1 && primary_has_modrm(_asm->op))
     {
-        printf("\tADD\n");
-        // state_AND() here
+        if (p >= end)
+            return 0;
+        _asm->has_modrm = true;
+        _asm->modrm = *p++;
     }
-    else if (byte <= 0x0d)
+    else
     {
-        printf("\tOR\n");
-        // state_OR() here
+        // TODO: Complete for several bytes mapping
     }
-    // ...
-    return p; // return where we are after consuming bytes
-}
 
-void disas(const uint8_t *ptr, size_t remaining)
+    // else if <in ranges for mod_rm with 2-3 bytes mapping> -> set modrm and
+    // has_modrm values accordingly
+
+    // Decode modrm & check SIB + get disp_size
+    if (_asm->has_modrm)
+    {
+        if (p >= end)
+            return 0;
+        uint8_t mod = _asm->modrm >> 6;
+        uint8_t reg = (_asm->modrm >> 3) & 7;
+        uint8_t rm = _asm->modrm & 7;
+
+        if (mod != 3 && rm == 4) // Check for SIB
+        {
+            if (p >= end)
+                return 0;
+            _asm->has_sib = true;
+            _asm->sib = *p++;
+        }
+        if (mod == 1)
+            _asm->disp_size = 1;
+        else if (mod == 2 || (mod == 0 && rm == 5))
+            _asm->disp_size = 4; // RIP relative addressing or 32 bit addressing
+
+        if (p + _asm->disp_size > end)
+            return 0;
+        p += _asm->disp_size;
+    }
+
+    // Get immediates size
+    if (_asm->imm_size > 0)
+    {
+        if (p + _asm->imm_size > end)
+            return 0;
+        p += _asm->imm_size;
+    }
+
+    return (size_t)(p - start);
+}
+void disas(const uint8_t *ptr, size_t size)
 {
     puts("Test parsing of bytes");
 
     const uint8_t *p = ptr;
-    const uint8_t *end = ptr + remaining;
+    const uint8_t *end = ptr + size;
 
     while (p < end)
     {
-        uint8_t byte = *p++;
-
-        if (byte == 0x0f)
-        {
-            printf("(2-byte prefix)\n");
-            p = state_0x0f(p);
-        }
-        else if (byte <= 0x25)
-        {
-            p = state_prim_opcode(byte, p);
-        }
-        // ... etc
-        else
-            printf("Unknown opcode: 0x%02x\n", byte);
+        // call disas to fill struct and
     }
 }

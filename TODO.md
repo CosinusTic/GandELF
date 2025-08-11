@@ -16,4 +16,6 @@
 - Highlight security-sensitive areas (e.g., writable/executable sections)
 - Output annotated disassembly like IDA or Ghidra (e.g., comments, xrefs)
 
-CPU instructions REF: http://ref.x86asm.net/coder64.html#x00
+CPU instructions table: http://ref.x86asm.net/coder64.html#x00
+CPU instuction encoding explained: https://wiki.osdev.org/X86-64_Instruction_Encoding#Legacy_Prefixes
+
