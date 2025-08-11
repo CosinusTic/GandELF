@@ -76,10 +76,7 @@ int main(int argc, char **argv)
 
     struct sym_info *sym = lst.items;
     printf("x86 ASM for symbol: %s\n", sym->name);
-    // disas((uint8_t *)sym->bytes, sym->size);
-
-    uint8_t code[] = { 0x88, 0xC1 };
-    disas(code, sizeof(code));
+    disas((uint8_t *)sym->bytes, sym->size);
 
     free_symlist(lst);
     free(impsec);

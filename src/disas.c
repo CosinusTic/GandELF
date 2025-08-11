@@ -199,13 +199,6 @@ size_t decode64(const uint8_t *p, size_t max, struct asm_ins *_asm)
         _asm->has_modrm = true;
         _asm->modrm = *p++;
     }
-    else
-    {
-        // TODO: Complete for several bytes mapping
-    }
-
-    // else if <in ranges for mod_rm with 2-3 bytes mapping> -> set modrm and
-    // has_modrm values accordingly
 
     // Decode modrm & check SIB + get disp_size
     if (_asm->has_modrm)
@@ -243,29 +236,34 @@ size_t decode64(const uint8_t *p, size_t max, struct asm_ins *_asm)
 
     return (size_t)(p - start);
 }
+
 void disas(const uint8_t *ptr, size_t size)
 {
+    puts("Test parsing of bytes");
+
     const uint8_t *p = ptr;
     const uint8_t *end = ptr + size;
-    struct asm_ins _asm;
+    struct asm_ins ins;
 
     while (p < end)
     {
-        size_t num_bytes_parsed = decode64(p, (size_t)(end - p), &_asm);
+        size_t num_bytes_parsed = decode64(p, (size_t)(end - p), &ins);
         if (num_bytes_parsed == 0)
         {
-            puts("Error parsing bytes");
+            puts("Decoding error");
             break;
         }
-        printf("Bytes parsed: ");
+
+        printf("Bytes parsed:");
         for (size_t i = 0; i < num_bytes_parsed; i++)
-            printf("\t0x%02x", p[i]);
-        putchar('\n');
+            printf(" 0x%02X", p[i]);
+
+        printf("\n\tmap=0x%X\n\topcode=0x%X\n\tmodrm_kind=%u\n\thas_modrm=%"
+               "d\n\tmodrm=0x%X "
+               "sib=0x%X disp_size=%d imm_size=%d op_size=%d\n\n",
+               ins.map, ins.op, ins.modrm_kind, ins.has_modrm, ins.modrm,
+               ins.sib, ins.disp_size, ins.imm_size, ins.op_size);
 
         p += num_bytes_parsed;
-        printf("map=0x%X op=0x%X modrm_kind=%u has_modrm=%d modrm=0x%X "
-               "sib=0x%X disp_size=%d imm_size=%d op_size=%d\n\n",
-               _asm.map, _asm.op, _asm.modrm_kind, _asm.has_modrm, _asm.modrm,
-               _asm.sib, _asm.disp_size, _asm.imm_size, _asm.op_size);
     }
 }
