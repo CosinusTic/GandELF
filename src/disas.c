@@ -70,24 +70,33 @@ Immediate(s) (0+ bytes):
 
 struct asm_ins
 {
-    bool has_66, has_67; // Operand or memory size override
-    bool lock; // Bus lock signal for multi-processing
-    bool rep, repne; // String handling loops
-    uint8_t rex; // bits W R X B, expand SIB bytes, specify operand size and
-                 // access r8-15
-    uint8_t map; // 1, 2, or 3 bytes overall instruction size
-    uint8_t op; // opcode
-    uint8_t modrm, sib; // Operands encoding
-    bool has_modrm, has_sib; // Whether opcode has operands
-    int disp_size; // Displacement size
-    int imm_size; // Size of immediates if any
-    int op_size; // 16/32/64
-    uint8_t modrm_kind;
+    // Prefixes / mode
+    bool has_66, has_67;
+    bool lock, rep, repne;
+    uint8_t rex; // 0100WRXB
+    int op_size; // 16/32/64 (Z-width)
+    int addr_size; // 32 or 64 (67h overrides to 32)
+
+    // Opcode bytes
+    uint8_t map; // 1, 0x0F, 0x38, 0x3A
+    uint8_t op; // opcode byte in that map
+
+    // Static descriptor for this opcode
+    const struct opcode_info *op_desc; // points into the map table you indexed
+
+    // ModR/M / SIB
+    bool has_modrm, has_sib;
+    uint8_t modrm, sib;
+    uint8_t mod, reg, rm; // extracted fields (3-bit each)
+    uint8_t scale, index, base; // from SIB when present (2/3/3 bits)
+
+    // Displacement / immediates
+    int disp_size;
+    int imm_size; // resolved for this instance
+    int64_t disp; // sign-extended disp8/disp32
+    uint64_t imm; // raw immediate value
 };
 
-// for 1 byte mappings that have /r modrm
-
-// TODO: add 2-3 byte maps has_modrm mapping
 /*
 -- parsing order
 [prefixes] -> [0F?/map] -> [opcode byte] -> [ModR/M? -> SIB? -> disp?] ->
@@ -95,22 +104,58 @@ struct asm_ins
 --
 */
 
-static struct opcode_info get_opcode_info(uint8_t op, uint8_t map)
+static const struct opcode_info *get_opcode_info(uint8_t op, uint8_t map)
 {
     switch (map)
     {
     case 1:
-        return modrm_prim_map[op];
+        return &modrm_prim_map[op];
     case 0x0F:
-        return modrm_0f_map[op];
+        return &modrm_0f_map[op];
     case 0x38:
-        return modrm_0f38_map[op];
+        return &modrm_0f38_map[op];
     case 0x3A:
-        return modrm_0f3a_map[op];
+        return &modrm_0f3a_map[op];
     default:
-        return (struct opcode_info){ N, 0 };
+        return NULL;
     }
 }
+
+// In bytes
+// static int resolve_imm_size(const struct opcode_info *d, int op_size)
+// {
+//     if (!d)
+//         return 0;
+//     if (d->imm_size)
+//         return d->imm_size;
+//
+//     for (int i = 0; i < d->operand_count && i < 3; i++)
+//         switch (d->operand_types[i])
+//         {
+//         case OT_IMM8:
+//             return 1;
+//         case OT_IMM16:
+//             return 2;
+//         case OT_IMM32:
+//             return 4;
+//         case OT_IMM64:
+//             return 8;
+//         // Backup to operand size
+//         case OT_REGZ:
+//         case OT_RMZ:
+//         default:
+//             break;
+//         }
+//
+//     if (op_size == 16)
+//         return 2;
+//     if (op_size == 32)
+//         return 4;
+//     if (op_size == 64)
+//         return 8;
+//
+//     return 0;
+// }
 
 size_t decode64(const uint8_t *p, size_t max, struct asm_ins *_asm)
 {
@@ -157,7 +202,7 @@ size_t decode64(const uint8_t *p, size_t max, struct asm_ins *_asm)
         break;
     }
 
-    // Get instruction size
+    // Get byte mapping
     if (*p == 0x0F)
     {
         p++;
@@ -184,15 +229,17 @@ size_t decode64(const uint8_t *p, size_t max, struct asm_ins *_asm)
 
     // Get operand size
     _asm->op_size = 32;
-    if (_asm->rex & 0x08) // Check that xxxx xxxx & 0000 1000 =! 0000 0000
+    if (_asm->rex & 0x08) // Check that xxxx xxxx & 0000 1000 != 0000 0000
         _asm->op_size = 64;
     else if (_asm->has_66)
         _asm->op_size = 16;
 
-    // TODO: Set has_modrm, fill imm_size
-    struct opcode_info opcode_info = get_opcode_info(_asm->op, _asm->map);
-    _asm->modrm_kind = opcode_info.modrm_kind;
-    if (opcode_info.modrm_kind != N)
+    // Get static info on opcode
+    _asm->op_desc = get_opcode_info(_asm->op, _asm->map);
+    if (!_asm->op_desc)
+        return 0;
+
+    if (_asm->op_desc->modrm_kind != N)
     {
         if (p >= end)
             return 0;
@@ -261,8 +308,8 @@ void disas(const uint8_t *ptr, size_t size)
         printf("\n\tmap=0x%X\n\topcode=0x%X\n\tmodrm_kind=%u\n\thas_modrm=%"
                "d\n\tmodrm=0x%X "
                "sib=0x%X disp_size=%d imm_size=%d op_size=%d\n\n",
-               ins.map, ins.op, ins.modrm_kind, ins.has_modrm, ins.modrm,
-               ins.sib, ins.disp_size, ins.imm_size, ins.op_size);
+               ins.map, ins.op, ins.op_desc->modrm_kind, ins.has_modrm,
+               ins.modrm, ins.sib, ins.disp_size, ins.imm_size, ins.op_size);
 
         p += num_bytes_parsed;
     }
