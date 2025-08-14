@@ -80,6 +80,36 @@ static const char *reg_name(unsigned reg, int width, uint8_t rex)
     }
 }
 
+static int resolve_imm_size(const struct opcode_info *d, int z)
+{
+    (void)z;
+    if (!d)
+        return 0;
+    if (d->imm_size)
+        return d->imm_size;
+
+    for (int i = 0; i < d->operand_count && i < 3; i++)
+    {
+        switch (d->operand_types[i])
+        {
+        case OT_IMM8:
+        case OT_REL8:
+            return 1;
+        case OT_IMM16:
+            return 2;
+        case OT_IMM32:
+        case OT_REL32:
+            return 4;
+        case OT_IMM64:
+            return 8;
+        default:
+            break;
+        }
+    }
+
+    return 0;
+}
+
 static void extract_modrm(struct asm_ins *ins)
 {
     ins->mod = ins->modrm >> 6;
@@ -104,16 +134,98 @@ static void extract_sib(struct asm_ins *ins)
         ins->base |= 8; // REX.B
 }
 
-// Memory formatter: [base + disp]
+// Memory formatter: [base + index*scale + disp]
 static void format_mem(char *buf, size_t cap, const struct asm_ins *ins)
 {
-    const char *base = reg_name(ins->rm & 15, 64, ins->rex);
+    // Address register width (32 when 67h, else 64)
+    const int aw = ins->addr_size;
+
+    // RIP-relative
+    if (!ins->has_sib && ins->mod != 3 && ((ins->rm & 7) == 5) && aw == 64)
+    {
+        // disp32 is relative to next RIP, just show [rip+disp]
+        if (ins->disp_size == 0)
+            snprintf(buf, cap, "[rip]");
+        else if (ins->disp_size == 1)
+            snprintf(buf, cap, "[rip%+d]", (int)(int8_t)ins->disp);
+        else
+            snprintf(buf, cap, "[rip%+d]", (int)(int32_t)ins->disp);
+        return;
+    }
+
+    // SIB
+    if (ins->has_sib && ins->mod != 3)
+    {
+        // Decode components
+        unsigned base = ins->base;
+        unsigned index = ins->index;
+        int scale = 1 << ins->scale;
+
+        const char *base_s = NULL;
+        const char *index_s = NULL;
+
+        // Base = none when mod==0 && base==5  (disp32 only)
+        bool have_base = !(ins->mod == 0 && ((base & 7) == 5));
+        bool have_index = ((index & 7) != 4); // 4 means "no index"
+
+        if (have_base)
+            base_s = reg_name(base, aw, ins->rex);
+        if (have_index)
+            index_s = reg_name(index, aw, ins->rex);
+
+        // Build
+        if (have_base && have_index)
+        {
+            if (ins->disp_size == 0)
+                snprintf(buf, cap, "[%s+%s*%d]", base_s, index_s, scale);
+            else if (ins->disp_size == 1)
+                snprintf(buf, cap, "[%s+%s*%d%+d]", base_s, index_s, scale,
+                         (int)(int8_t)ins->disp);
+            else
+                snprintf(buf, cap, "[%s+%s*%d%+d]", base_s, index_s, scale,
+                         (int)(int32_t)ins->disp);
+        }
+        else if (have_base)
+        {
+            if (ins->disp_size == 0)
+                snprintf(buf, cap, "[%s]", base_s);
+            else if (ins->disp_size == 1)
+                snprintf(buf, cap, "[%s%+d]", base_s, (int)(int8_t)ins->disp);
+            else
+                snprintf(buf, cap, "[%s%+d]", base_s, (int)(int32_t)ins->disp);
+        }
+        else if (have_index)
+        {
+            if (ins->disp_size == 0)
+                snprintf(buf, cap, "[%s*%d]", index_s, scale);
+            else if (ins->disp_size == 1)
+                snprintf(buf, cap, "[%s*%d%+d]", index_s, scale,
+                         (int)(int8_t)ins->disp);
+            else
+                snprintf(buf, cap, "[%s*%d%+d]", index_s, scale,
+                         (int)(int32_t)ins->disp);
+        }
+        else
+        {
+            // pure disp
+            if (ins->disp_size == 0)
+                snprintf(buf, cap, "[0]");
+            else if (ins->disp_size == 1)
+                snprintf(buf, cap, "[%d]", (int)(int8_t)ins->disp);
+            else
+                snprintf(buf, cap, "[%d]", (int)(int32_t)ins->disp);
+        }
+        return;
+    }
+
+    // Simple base+disp (no SIB)
+    const char *base = reg_name(ins->rm, aw, ins->rex);
     if (ins->disp_size == 0)
         snprintf(buf, cap, "[%s]", base);
     else if (ins->disp_size == 1)
-        snprintf(buf, cap, "[%s%+d]", base, (int)ins->disp);
+        snprintf(buf, cap, "[%s%+d]", base, (int)(int8_t)ins->disp);
     else
-        snprintf(buf, cap, "[%s%+d]", base, (int)ins->disp);
+        snprintf(buf, cap, "[%s%+d]", base, (int)(int32_t)ins->disp);
 }
 
 static const struct opcode_info *get_opcode_info(uint8_t op, uint8_t map)
@@ -184,7 +296,7 @@ static void print_operand_generic(const struct asm_ins *ins, uint8_t kind,
         }
         else
             regid = ins->reg;
-        printf("%%%s", reg_name(regid, w, ins->rex));
+        printf("%s", reg_name(regid, w, ins->rex));
         break;
     }
 
@@ -197,7 +309,7 @@ static void print_operand_generic(const struct asm_ins *ins, uint8_t kind,
     case OT_RMZ: {
         int w = width_from_kind(kind, ins->op_size);
         if (ins->mod == 3)
-            printf("%%%s", reg_name(ins->rm, w, ins->rex));
+            printf("%s", reg_name(ins->rm, w, ins->rex));
         else
         {
             char mem[64];
@@ -209,30 +321,30 @@ static void print_operand_generic(const struct asm_ins *ins, uint8_t kind,
 
     // fixed registers
     case OT_AL:
-        printf("%%al");
+        printf("al");
         break;
     case OT_AX:
-        printf("%%ax");
+        printf("ax");
         break;
     case OT_EAX:
-        printf("%%eax");
+        printf("eax");
         break;
     case OT_RAX:
-        printf("%%rax");
+        printf("rax");
         break;
 
     // immediates
     case OT_IMM8:
-        printf("$0x%02" PRIx64, (uint64_t)(ins->imm & 0xff));
+        printf("0x%02" PRIx64, (uint64_t)(ins->imm & 0xff));
         break;
     case OT_IMM16:
-        printf("$0x%04" PRIx64, (uint64_t)(ins->imm & 0xffff));
+        printf("0x%04" PRIx64, (uint64_t)(ins->imm & 0xffff));
         break;
     case OT_IMM32:
-        printf("$0x%08" PRIx64, (uint64_t)(ins->imm & 0xffffffffULL));
+        printf("0x%08" PRIx64, (uint64_t)(ins->imm & 0xffffffffULL));
         break;
     case OT_IMM64:
-        printf("$0x%016" PRIx64, (uint64_t)ins->imm);
+        printf("0x%016" PRIx64, (uint64_t)ins->imm);
         break;
 
     // rel8/rel32 (print as signed displacements)
@@ -248,8 +360,6 @@ static void print_operand_generic(const struct asm_ins *ins, uint8_t kind,
     }
 }
 
-// --- table-driven instruction printer -----------------------------------
-
 static void print_simple(const uint8_t *addr, size_t len,
                          const struct asm_ins *ins)
 {
@@ -260,24 +370,20 @@ static void print_simple(const uint8_t *addr, size_t len,
     for (size_t i = len; i < 8 && i < 8; i++)
         printf("   ");
 
-    // fallback if no descriptor/mnemonic
+    // Mnemonic
     if (!ins->op_desc || !ins->op_desc->mnemonic || !ins->op_desc->mnemonic[0])
     {
         printf("db 0x%02X\n", ins->op);
         return;
     }
-
-    // print mnemonic
     printf("%s", ins->op_desc->mnemonic);
 
-    // no operands?
+    // Operands
     if (ins->op_desc->operand_count == 0)
     {
         putchar('\n');
         return;
     }
-
-    // print operands per table (Intel order)
     putchar(' ');
     for (int i = 0; i < ins->op_desc->operand_count; i++)
     {
@@ -371,6 +477,8 @@ size_t decode64(const uint8_t *p, size_t max, struct asm_ins *ins)
     else if (ins->has_66)
         ins->op_size = 16;
 
+    ins->addr_size = ins->has_67 ? 32 : 64;
+
     // Descriptor
     ins->op_desc = get_opcode_info(ins->op, ins->map);
     if (!ins->op_desc)
@@ -428,6 +536,8 @@ size_t decode64(const uint8_t *p, size_t max, struct asm_ins *ins)
             }
         }
     }
+
+    ins->imm_size = resolve_imm_size(ins->op_desc, ins->op_size);
 
     // Immediates (only used for bounds check & pointer update)
     if (ins->imm_size)
