@@ -133,71 +133,157 @@ static const struct opcode_info *get_opcode_info(uint8_t op, uint8_t map)
     }
 }
 
-static void print_operand(char *buf, size_t cap, const struct asm_ins *ins,
-                          uint8_t ot, int index)
+static int width_from_kind(uint8_t kind, int z)
 {
-    (void)index;
-    switch (ot)
+    switch (kind)
     {
-    case OT_REG:
-    case OT_REGZ: {
-        // If reg comes from opcode bits, index==special marker
-        unsigned regid;
-        if (ins->op_desc->modrm_kind == N)
-        {
-            // register in low bits of opcode
-            regid = (ins->op & 7) | ((ins->rex & 0x1) ? 8 : 0);
-        }
-        else
-        {
-            regid = ins->reg;
-        }
-        snprintf(buf, cap, "%%%s", reg_name(regid, ins->op_size, ins->rex));
-        break;
-    }
-    case OT_RM:
+    case OT_REG8:
+    case OT_RM8:
+        return 8;
+    case OT_REG16:
+    case OT_RM16:
+        return 16;
+    case OT_REG32:
+    case OT_RM32:
+        return 32;
+    case OT_REG64:
+    case OT_RM64:
+        return 64;
+    case OT_REGZ:
     case OT_RMZ:
-        if (ins->mod == 3)
-        {
-            snprintf(buf, cap, "%%%s",
-                     reg_name(ins->rm, ins->op_size, ins->rex));
-        }
-        else
-        {
-            char mem[64];
-            format_mem(mem, sizeof(mem), ins);
-            snprintf(buf, cap, "%s", mem);
-        }
-        break;
-    case OT_IMM8:
-        snprintf(buf, cap, "$0x%" PRIx8, (uint8_t)ins->imm);
-        break;
-    case OT_IMM16:
-        snprintf(buf, cap, "$0x%" PRIx16, (uint16_t)ins->imm);
-        break;
-    case OT_IMM32:
-        snprintf(buf, cap, "$0x%" PRIx32, (uint32_t)ins->imm);
-        break;
-    case OT_IMM64:
-        snprintf(buf, cap, "$0x%" PRIx64, ins->imm);
-        break;
+        return z;
     default:
-        snprintf(buf, cap, "<?>");
+        return z; // OT_REG/OT_RM fallback
     }
 }
 
-static void print_instruction(const struct asm_ins *ins)
+static void print_operand_generic(const struct asm_ins *ins, uint8_t kind,
+                                  int idx)
 {
+    (void)idx;
+    switch (kind)
+    {
+    // registers encoded via ModR/M or, if no ModR/M, in opcode (push/pop)
+    case OT_REG:
+    case OT_REG8:
+    case OT_REG16:
+    case OT_REG32:
+    case OT_REG64:
+    case OT_REGZ: {
+        int w = width_from_kind(kind, ins->op_size);
+        unsigned regid;
+
+        if (!ins->has_modrm)
+        {
+            // No ModR/M: take reg from low 3 bits of opcode (opcode+rd form).
+            regid = (ins->op & 7) | ((ins->rex & 0x1) ? 8 : 0);
+            // In long mode, treat pushes/pops etc. as 64-bit even if Z says 32
+            if (w == ins->op_size
+                && ((ins->op & 0xF8) == 0x50 || (ins->op & 0xF8) == 0x58))
+                w = 64;
+        }
+        else
+            regid = ins->reg;
+        printf("%%%s", reg_name(regid, w, ins->rex));
+        break;
+    }
+
+    // r/m operand (depending on mod)
+    case OT_RM:
+    case OT_RM8:
+    case OT_RM16:
+    case OT_RM32:
+    case OT_RM64:
+    case OT_RMZ: {
+        int w = width_from_kind(kind, ins->op_size);
+        if (ins->mod == 3)
+            printf("%%%s", reg_name(ins->rm, w, ins->rex));
+        else
+        {
+            char mem[64];
+            format_mem(mem, sizeof mem, ins);
+            printf("%s", mem);
+        }
+        break;
+    }
+
+    // fixed registers
+    case OT_AL:
+        printf("%%al");
+        break;
+    case OT_AX:
+        printf("%%ax");
+        break;
+    case OT_EAX:
+        printf("%%eax");
+        break;
+    case OT_RAX:
+        printf("%%rax");
+        break;
+
+    // immediates
+    case OT_IMM8:
+        printf("$0x%02" PRIx64, (uint64_t)(ins->imm & 0xff));
+        break;
+    case OT_IMM16:
+        printf("$0x%04" PRIx64, (uint64_t)(ins->imm & 0xffff));
+        break;
+    case OT_IMM32:
+        printf("$0x%08" PRIx64, (uint64_t)(ins->imm & 0xffffffffULL));
+        break;
+    case OT_IMM64:
+        printf("$0x%016" PRIx64, (uint64_t)ins->imm);
+        break;
+
+    // rel8/rel32 (print as signed displacements)
+    case OT_REL8:
+        printf(".+%d", (int8_t)ins->imm);
+        break;
+    case OT_REL32:
+        printf(".+%d", (int32_t)ins->imm);
+        break;
+    default:
+        printf("<?>");
+        break;
+    }
+}
+
+// --- table-driven instruction printer -----------------------------------
+
+static void print_simple(const uint8_t *addr, size_t len,
+                         const struct asm_ins *ins)
+{
+    // bytes column (8 bytes max)
+    printf("%-16s", "");
+    for (size_t i = 0; i < len && i < 8; i++)
+        printf("%02X ", addr[i]);
+    for (size_t i = len; i < 8 && i < 8; i++)
+        printf("   ");
+
+    // fallback if no descriptor/mnemonic
+    if (!ins->op_desc || !ins->op_desc->mnemonic || !ins->op_desc->mnemonic[0])
+    {
+        printf("db 0x%02X\n", ins->op);
+        return;
+    }
+
+    // print mnemonic
     printf("%s", ins->op_desc->mnemonic);
 
+    // no operands?
+    if (ins->op_desc->operand_count == 0)
+    {
+        putchar('\n');
+        return;
+    }
+
+    // print operands per table (Intel order)
+    putchar(' ');
     for (int i = 0; i < ins->op_desc->operand_count; i++)
     {
-        char opbuf[64];
         if (i)
             printf(", ");
-        print_operand(opbuf, sizeof(opbuf), ins, ins->op_desc->operand_types[i],
-                      i);
-        printf("%s", opbuf);
+        print_operand_generic(ins, ins->op_desc->operand_types[i], i);
     }
     putchar('\n');
 }
@@ -363,14 +449,6 @@ size_t decode64(const uint8_t *p, size_t max, struct asm_ins *ins)
  * AT&T:  mov src, dst
  */
 
-static void print_simple(const struct asm_ins *ins)
-{
-    if (ins->op_desc && ins->op_desc->mnemonic[0])
-        print_instruction(ins);
-    else
-        printf("db 0x%02X\n", ins->op);
-}
-
 void disas(const uint8_t *ptr, size_t size)
 {
     puts("Test parsing of bytes");
@@ -393,7 +471,7 @@ void disas(const uint8_t *ptr, size_t size)
             printf(" 0x%02X", p[i]);
         putchar('\n');
 
-        print_simple(&ins);
+        print_simple(p, n, &ins);
         p += n;
     }
 }
