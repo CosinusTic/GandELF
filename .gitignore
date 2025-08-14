@@ -1,3 +1,4 @@
 bin/*
 src/*.o
 test/test
+.clangd

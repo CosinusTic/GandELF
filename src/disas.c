@@ -81,14 +81,13 @@ struct asm_ins
     uint8_t map; // 1, 0x0F, 0x38, 0x3A
     uint8_t op; // opcode byte in that map
 
-    // Static descriptor for this opcode
-    const struct opcode_info *op_desc; // points into the map table you indexed
+    const struct opcode_info *op_desc; // Custom opcode descriptor
 
     // ModR/M / SIB
     bool has_modrm, has_sib;
     uint8_t modrm, sib;
-    uint8_t mod, reg, rm; // extracted fields (3-bit each)
-    uint8_t scale, index, base; // from SIB when present (2/3/3 bits)
+    uint8_t mod, reg, rm;
+    uint8_t scale, index, base;
 
     // Displacement / immediates
     int disp_size;
@@ -96,6 +95,136 @@ struct asm_ins
     int64_t disp; // sign-extended disp8/disp32
     uint64_t imm; // raw immediate value
 };
+
+// --------- register name helpers (already similar in your other version)
+// ----------
+static const char *reg8_no_rex[16] = { "al",   "cl",   "dl",   "bl",
+                                       "ah",   "ch",   "dh",   "bh",
+                                       "r8b",  "r9b",  "r10b", "r11b",
+                                       "r12b", "r13b", "r14b", "r15b" };
+static const char *reg8_rex[16] = { "al",   "cl",   "dl",   "bl",
+                                    "spl",  "bpl",  "sil",  "dil",
+                                    "r8b",  "r9b",  "r10b", "r11b",
+                                    "r12b", "r13b", "r14b", "r15b" };
+static const char *reg16[16] = { "ax",   "cx",   "dx",   "bx",  "sp",   "bp",
+                                 "si",   "di",   "r8w",  "r9w", "r10w", "r11w",
+                                 "r12w", "r13w", "r14w", "r15w" };
+static const char *reg32[16] = { "eax",  "ecx",  "edx",  "ebx", "esp",  "ebp",
+                                 "esi",  "edi",  "r8d",  "r9d", "r10d", "r11d",
+                                 "r12d", "r13d", "r14d", "r15d" };
+static const char *reg64[16] = { "rax", "rcx", "rdx", "rbx", "rsp", "rbp",
+                                 "rsi", "rdi", "r8",  "r9",  "r10", "r11",
+                                 "r12", "r13", "r14", "r15" };
+
+static const char *reg_name(unsigned reg, int width, uint8_t rex)
+{
+    switch (width)
+    {
+    case 8:
+        return (rex ? reg8_rex : reg8_no_rex)[reg & 15];
+    case 16:
+        return reg16[reg & 15];
+    case 32:
+        return reg32[reg & 15];
+    case 64:
+        return reg64[reg & 15];
+    default:
+        return "??";
+    }
+}
+
+static void extract_modrm(struct asm_ins *ins)
+{
+    ins->mod = ins->modrm >> 6;
+    ins->reg = (ins->modrm >> 3) & 7;
+    ins->rm = ins->modrm & 7;
+
+    // REX extensions: R extends reg, B extends r/m (and base), X extends index
+    if (ins->rex & 0x4)
+        ins->reg |= 8; // REX.R
+    if (ins->rex & 0x1)
+        ins->rm |= 8; // REX.B
+}
+
+static void extract_sib(struct asm_ins *ins)
+{
+    ins->scale = ins->sib >> 6;
+    ins->index = (ins->sib >> 3) & 7;
+    ins->base = ins->sib & 7;
+    if (ins->rex & 0x2)
+        ins->index |= 8; // REX.X
+    if (ins->rex & 0x1)
+        ins->base |= 8; // REX.B
+}
+
+static void format_mem(char *buf, size_t cap, const struct asm_ins *ins)
+{
+    // Only base+disp
+    const char *base =
+        reg_name(ins->rm & 15, 64, ins->rex); // use 64-bit base names
+    if (ins->disp_size == 0)
+        snprintf(buf, cap, "[%s]", base);
+    else if (ins->disp_size == 1)
+        snprintf(buf, cap, "[%s%+d]", base, (int)(int8_t)ins->disp);
+    else
+        snprintf(buf, cap, "[%s%+d]", base, (int)(int32_t)ins->disp);
+}
+
+static void print_mov_add_operands(const struct asm_ins *ins, uint8_t op,
+                                   int op_size)
+{
+    // op_size is 16/32/64; pick register width Z
+    int z = op_size;
+    if (op == 0x89)
+    {
+        // mov r/mZ, rZ  (reg -> r/m)
+        if (ins->mod == 3)
+        {
+            printf("%%%s, %%%s", reg_name(ins->rm, z, ins->rex),
+                   reg_name(ins->reg, z, ins->rex));
+        }
+        else
+        {
+            char mem[64];
+            format_mem(mem, sizeof mem, ins);
+            printf("%s, %%%s", mem, reg_name(ins->reg, z, ins->rex));
+        }
+    }
+    else if (op == 0x8B)
+    {
+        // mov rZ, r/mZ  (r/m -> reg)
+        if (ins->mod == 3)
+        {
+            printf("%%%s, %%%s", reg_name(ins->reg, z, ins->rex),
+                   reg_name(ins->rm, z, ins->rex));
+        }
+        else
+        {
+            char mem[64];
+            format_mem(mem, sizeof mem, ins);
+            printf("%%%s, %s", reg_name(ins->reg, z, ins->rex), mem);
+        }
+    }
+    else if (op == 0x01)
+    {
+        // add r/mZ, rZ   (dest is r/m)
+        if (ins->mod == 3)
+        {
+            printf("%%%s, %%%s", reg_name(ins->rm, z, ins->rex),
+                   reg_name(ins->reg, z, ins->rex));
+        }
+        else
+        {
+            char mem[64];
+            format_mem(mem, sizeof mem, ins);
+            printf("%s, %%%s", mem, reg_name(ins->reg, z, ins->rex));
+        }
+    }
+    else
+    {
+        printf("<?>");
+    }
+}
 
 /*
 -- parsing order
@@ -120,42 +249,6 @@ static const struct opcode_info *get_opcode_info(uint8_t op, uint8_t map)
         return NULL;
     }
 }
-
-// In bytes
-// static int resolve_imm_size(const struct opcode_info *d, int op_size)
-// {
-//     if (!d)
-//         return 0;
-//     if (d->imm_size)
-//         return d->imm_size;
-//
-//     for (int i = 0; i < d->operand_count && i < 3; i++)
-//         switch (d->operand_types[i])
-//         {
-//         case OT_IMM8:
-//             return 1;
-//         case OT_IMM16:
-//             return 2;
-//         case OT_IMM32:
-//             return 4;
-//         case OT_IMM64:
-//             return 8;
-//         // Backup to operand size
-//         case OT_REGZ:
-//         case OT_RMZ:
-//         default:
-//             break;
-//         }
-//
-//     if (op_size == 16)
-//         return 2;
-//     if (op_size == 32)
-//         return 4;
-//     if (op_size == 64)
-//         return 8;
-//
-//     return 0;
-// }
 
 size_t decode64(const uint8_t *p, size_t max, struct asm_ins *_asm)
 {
@@ -245,6 +338,7 @@ size_t decode64(const uint8_t *p, size_t max, struct asm_ins *_asm)
             return 0;
         _asm->has_modrm = true;
         _asm->modrm = *p++;
+        extract_modrm(_asm);
     }
 
     // Decode modrm & check SIB + get disp_size
@@ -262,6 +356,7 @@ size_t decode64(const uint8_t *p, size_t max, struct asm_ins *_asm)
                 return 0;
             _asm->has_sib = true;
             _asm->sib = *p++;
+            extract_sib(_asm);
         }
         if (mod == 1)
             _asm->disp_size = 1;
@@ -284,6 +379,66 @@ size_t decode64(const uint8_t *p, size_t max, struct asm_ins *_asm)
     return (size_t)(p - start);
 }
 
+static void print_simple(const uint8_t *addr, size_t len,
+                         const struct asm_ins *ins)
+{
+    // bytes
+    printf("%-16s", ""); // room for address column if you add one later
+    for (size_t i = 0; i < len && i < 8; i++)
+        printf("%02X ", addr[i]);
+    if (len > 8)
+        printf("... ");
+    if (len < 8)
+    {
+        for (size_t i = len; i < 8; i++)
+            printf("   ");
+    }
+
+    // mnemonic/opcode families we actually hit
+    if (ins->op == 0xC3)
+    {
+        puts("ret");
+        return;
+    }
+
+    // PUSH/POP opcode+rd families
+    if ((ins->op & 0xF8) == 0x50)
+    {
+        unsigned rd = (ins->op & 7) | ((ins->rex & 0x1) ? 8 : 0);
+        printf("push %%%s\n", reg_name(rd, ins->op_size, ins->rex));
+        return;
+    }
+    if ((ins->op & 0xF8) == 0x58)
+    {
+        unsigned rd = (ins->op & 7) | ((ins->rex & 0x1) ? 8 : 0);
+        printf("pop %%%s\n", reg_name(rd, ins->op_size, ins->rex));
+        return;
+    }
+
+    // Table-driven for mov/add we’ve seen
+    switch (ins->op)
+    {
+    case 0x89:
+        printf("mov ");
+        print_mov_add_operands(ins, 0x89, ins->op_size);
+        puts("");
+        break;
+    case 0x8B:
+        printf("mov ");
+        print_mov_add_operands(ins, 0x8B, ins->op_size);
+        puts("");
+        break;
+    case 0x01:
+        printf("add ");
+        print_mov_add_operands(ins, 0x01, ins->op_size);
+        puts("");
+        break;
+    default:
+        puts("db 0x??");
+        break; // fallback stub
+    }
+}
+
 void disas(const uint8_t *ptr, size_t size)
 {
     puts("Test parsing of bytes");
@@ -304,13 +459,15 @@ void disas(const uint8_t *ptr, size_t size)
         printf("Bytes parsed:");
         for (size_t i = 0; i < num_bytes_parsed; i++)
             printf(" 0x%02X", p[i]);
+        putchar('\n');
 
-        printf("\n\tmap=0x%X\n\topcode=0x%X\n\tmodrm_kind=%u\n\thas_modrm=%"
-               "d\n\tmodrm=0x%X "
-               "sib=0x%X disp_size=%d imm_size=%d op_size=%d\n\n",
-               ins.map, ins.op, ins.op_desc->modrm_kind, ins.has_modrm,
-               ins.modrm, ins.sib, ins.disp_size, ins.imm_size, ins.op_size);
+        // printf("\n\tmap=0x%X\n\topcode=0x%X\n\tmodrm_kind=%u\n\thas_modrm=%"
+        //        "d\n\tmodrm=0x%X "
+        //        "sib=0x%X disp_size=%d imm_size=%d op_size=%d\n\n",
+        //        ins.map, ins.op, ins.op_desc->modrm_kind, ins.has_modrm,
+        //        ins.modrm, ins.sib, ins.disp_size, ins.imm_size, ins.op_size);
 
+        print_simple(p, num_bytes_parsed, &ins);
         p += num_bytes_parsed;
     }
 }
