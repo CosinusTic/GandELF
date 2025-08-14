@@ -1,0 +1,55 @@
+/*
+ * 0F: whether the opcode map is two-byte (starts with 0x0F). If yes, you must
+read a second opcode byte; for 3-byte maps you’ll see 0F 38 or 0F 3A, etc.
+
+po / so (primary / secondary opcode): the actual opcode byte(s). For one-byte
+map it’s just po. For two-byte, it’s 0F + po. For three-byte, 0F + so + po
+(e.g., 0F 38 xx).
+
+e (extension): tells you about ModR/M.reg usage:
+    /r → instruction has a ModR/M and the reg field selects a register operand.
+    /0…/7 → instruction has a ModR/M and reg must be that value (selects an
+opcode subgroup).
+mnemonic: human-readable instruction name (ADD, MOV, …).
+
+op1, op2, …: operand forms. Shorthands:
+    r/m8|16|32|64 → either register or memory of that size (decided by
+ModR/M.mod+rm).
+    r8|16|32|64 → register of that size (from ModR/M.reg or the opcode itself).
+    AL/AX/EAX/RAX → accumulator special encodings.
+    imm8|imm16|imm32|imm64 → immediate of that size follows the encoding.
+    rel8|rel32 → relative immediate for branches.
+
+The rest (tested/modified flags, CPU “proc”, etc.) are semantics/availability;
+not needed to compute lengths.
+
+
+-- Memo
+Prefixes (0+ bytes): F0/F2/F3, 66, 67, segment overrides, and in 64-bit: REX
+(40–4F). Record flags (e.g., REX.W, operand-size=16 when 66).
+
+Opcode:
+    1 byte (primary map), or
+    0F + 1 byte (two-byte map), or
+    0F 38/0F 3A + 1 byte (three-byte maps).
+
+ModR/M (0 or 1):
+    Required when the table shows /r or /0..7 (opcode extension), or when
+operand is r/m....
+    Decode mod/reg/rm.
+
+SIB (0 or 1):
+    Only if mod != 11 and rm == 100b (in 32/64-bit addressing).
+
+Displacement (0/1/4 bytes typically in 64-bit):
+    From mod:
+        00: none, except rm=101b → disp32 (and in 64-bit this is RIP-relative).
+        01: disp8
+        10: disp32
+
+Immediate(s) (0+ bytes):
+    From the operands column: imm8/16/32/64, or rel8/rel32, etc.
+
+--
+*/
+
