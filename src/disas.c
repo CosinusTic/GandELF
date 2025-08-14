@@ -133,6 +133,75 @@ static const struct opcode_info *get_opcode_info(uint8_t op, uint8_t map)
     }
 }
 
+static void print_operand(char *buf, size_t cap, const struct asm_ins *ins,
+                          uint8_t ot, int index)
+{
+    (void)index;
+    switch (ot)
+    {
+    case OT_REG:
+    case OT_REGZ: {
+        // If reg comes from opcode bits, index==special marker
+        unsigned regid;
+        if (ins->op_desc->modrm_kind == N)
+        {
+            // register in low bits of opcode
+            regid = (ins->op & 7) | ((ins->rex & 0x1) ? 8 : 0);
+        }
+        else
+        {
+            regid = ins->reg;
+        }
+        snprintf(buf, cap, "%%%s", reg_name(regid, ins->op_size, ins->rex));
+        break;
+    }
+    case OT_RM:
+    case OT_RMZ:
+        if (ins->mod == 3)
+        {
+            snprintf(buf, cap, "%%%s",
+                     reg_name(ins->rm, ins->op_size, ins->rex));
+        }
+        else
+        {
+            char mem[64];
+            format_mem(mem, sizeof(mem), ins);
+            snprintf(buf, cap, "%s", mem);
+        }
+        break;
+    case OT_IMM8:
+        snprintf(buf, cap, "$0x%" PRIx8, (uint8_t)ins->imm);
+        break;
+    case OT_IMM16:
+        snprintf(buf, cap, "$0x%" PRIx16, (uint16_t)ins->imm);
+        break;
+    case OT_IMM32:
+        snprintf(buf, cap, "$0x%" PRIx32, (uint32_t)ins->imm);
+        break;
+    case OT_IMM64:
+        snprintf(buf, cap, "$0x%" PRIx64, ins->imm);
+        break;
+    default:
+        snprintf(buf, cap, "<?>");
+    }
+}
+
+static void print_instruction(const struct asm_ins *ins)
+{
+    printf("%s", ins->op_desc->mnemonic);
+
+    for (int i = 0; i < ins->op_desc->operand_count; i++)
+    {
+        char opbuf[64];
+        if (i)
+            printf(", ");
+        print_operand(opbuf, sizeof(opbuf), ins, ins->op_desc->operand_types[i],
+                      i);
+        printf("%s", opbuf);
+    }
+    putchar('\n');
+}
+
 size_t decode64(const uint8_t *p, size_t max, struct asm_ins *ins)
 {
     const uint8_t *start = p;
@@ -294,73 +363,12 @@ size_t decode64(const uint8_t *p, size_t max, struct asm_ins *ins)
  * AT&T:  mov src, dst
  */
 
-static void print_operand_rm(const struct asm_ins *ins, int width)
+static void print_simple(const struct asm_ins *ins)
 {
-    if (ins->mod == 3)
-    {
-        printf("%%%s", reg_name(ins->rm, width, ins->rex));
-    }
+    if (ins->op_desc && ins->op_desc->mnemonic[0])
+        print_instruction(ins);
     else
-    {
-        char mem[64];
-        format_mem(mem, sizeof mem, ins);
-        printf("%s", mem);
-    }
-}
-
-static void print_operand_reg(const struct asm_ins *ins, int width)
-{
-    printf("%%%s", reg_name(ins->reg, width, ins->rex));
-}
-
-static void print_operands_generic(const struct asm_ins *ins)
-{
-    int width = ins->op_size;
-
-    switch (ins->op_desc->modrm_kind)
-    {
-    case R: // reg, r/m
-        print_operand_reg(ins, width);
-        printf(", ");
-        print_operand_rm(ins, width);
-        break;
-    case D: // r/m, reg
-        print_operand_rm(ins, width);
-        printf(", ");
-        print_operand_reg(ins, width);
-        break;
-    case N: // no operands
-        break;
-    default:
-        // fallback: assume r/m, reg
-        print_operand_rm(ins, width);
-        printf(", ");
-        print_operand_reg(ins, width);
-        break;
-    }
-}
-
-static void print_simple(const uint8_t *addr, size_t len,
-                         const struct asm_ins *ins)
-{
-    // bytes column
-    printf("%-16s", "");
-    for (size_t i = 0; i < len && i < 8; i++)
-        printf("%02X ", addr[i]);
-    for (size_t i = len; i < 8 && i < 8; i++)
-        printf("   ");
-
-    // name from table
-    if (ins->op_desc && ins->op_desc->mnemonic && ins->op_desc->mnemonic[0])
-    {
-        printf("%s ", ins->op_desc->mnemonic);
-        print_operands_generic(ins);
-        puts("");
-    }
-    else
-    {
-        puts("db 0x??");
-    }
+        printf("db 0x%02X\n", ins->op);
 }
 
 void disas(const uint8_t *ptr, size_t size)
@@ -385,7 +393,7 @@ void disas(const uint8_t *ptr, size_t size)
             printf(" 0x%02X", p[i]);
         putchar('\n');
 
-        print_simple(p, n, &ins);
+        print_simple(&ins);
         p += n;
     }
 }
