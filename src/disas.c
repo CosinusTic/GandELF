@@ -109,17 +109,11 @@ static void format_mem(char *buf, size_t cap, const struct asm_ins *ins)
 {
     const char *base = reg_name(ins->rm & 15, 64, ins->rex);
     if (ins->disp_size == 0)
-    {
         snprintf(buf, cap, "[%s]", base);
-    }
     else if (ins->disp_size == 1)
-    {
-        snprintf(buf, cap, "[%s%+d]", base, (int)(int8_t)ins->disp);
-    }
+        snprintf(buf, cap, "[%s%+d]", base, (int)ins->disp);
     else
-    {
-        snprintf(buf, cap, "[%s%+d]", base, (int)(int32_t)ins->disp);
-    }
+        snprintf(buf, cap, "[%s%+d]", base, (int)ins->disp);
 }
 
 static const struct opcode_info *get_opcode_info(uint8_t op, uint8_t map)
@@ -295,128 +289,79 @@ size_t decode64(const uint8_t *p, size_t max, struct asm_ins *ins)
 
 /* ---------------- Pretty-printer (simple) ---------------- */
 
-static void print_mov_add_operands(const struct asm_ins *ins, uint8_t op,
-                                   int op_size)
+/* Syntax
+ * Intel: mov dst, src
+ * AT&T:  mov src, dst
+ */
+
+static void print_operand_rm(const struct asm_ins *ins, int width)
 {
-    const int z = op_size;
-
-    if (op == 0x89)
+    if (ins->mod == 3)
     {
-        // Intel: mov r/mZ, rZ   (dest=r/m, src=reg)
-        // AT&T:  mov src, dst   => reg, r/m
-        if (ins->mod == 3)
-        {
-            printf("%%%s, %%%s", reg_name(ins->reg, z, ins->rex), // src
-                   reg_name(ins->rm, z, ins->rex)); // dst
-        }
-        else
-        {
-            char mem[64];
-            format_mem(mem, sizeof mem, ins);
-            printf("%%%s, %s", reg_name(ins->reg, z, ins->rex), // src
-                   mem); // dst
-        }
-        return;
+        printf("%%%s", reg_name(ins->rm, width, ins->rex));
     }
-
-    if (op == 0x8B)
+    else
     {
-        // Intel: mov rZ, r/mZ   (dest=reg, src=r/m)
-        // AT&T:  mov src, dst   => r/m, reg
-        if (ins->mod == 3)
-        {
-            printf("%%%s, %%%s", reg_name(ins->rm, z, ins->rex), // src
-                   reg_name(ins->reg, z, ins->rex)); // dst
-        }
-        else
-        {
-            char mem[64];
-            format_mem(mem, sizeof mem, ins);
-            printf("%s, %%%s",
-                   mem, // src
-                   reg_name(ins->reg, z, ins->rex)); // dst
-        }
-        return;
+        char mem[64];
+        format_mem(mem, sizeof mem, ins);
+        printf("%s", mem);
     }
+}
 
-    if (op == 0x01)
+static void print_operand_reg(const struct asm_ins *ins, int width)
+{
+    printf("%%%s", reg_name(ins->reg, width, ins->rex));
+}
+
+static void print_operands_generic(const struct asm_ins *ins)
+{
+    int width = ins->op_size;
+
+    switch (ins->op_desc->modrm_kind)
     {
-        // Intel: add r/mZ, rZ   (dest=r/m, src=reg)
-        // AT&T:  add src, dst   => reg, r/m
-        if (ins->mod == 3)
-        {
-            printf("%%%s, %%%s", reg_name(ins->reg, z, ins->rex), // src
-                   reg_name(ins->rm, z, ins->rex)); // dst
-        }
-        else
-        {
-            char mem[64];
-            format_mem(mem, sizeof mem, ins);
-            printf("%%%s, %s", reg_name(ins->reg, z, ins->rex), // src
-                   mem); // dst
-        }
-        return;
+    case R: // reg, r/m
+        print_operand_reg(ins, width);
+        printf(", ");
+        print_operand_rm(ins, width);
+        break;
+    case D: // r/m, reg
+        print_operand_rm(ins, width);
+        printf(", ");
+        print_operand_reg(ins, width);
+        break;
+    case N: // no operands
+        break;
+    default:
+        // fallback: assume r/m, reg
+        print_operand_rm(ins, width);
+        printf(", ");
+        print_operand_reg(ins, width);
+        break;
     }
-
-    printf("<?>");
 }
 
 static void print_simple(const uint8_t *addr, size_t len,
                          const struct asm_ins *ins)
 {
-    // bytes column (8 bytes max to keep it compact)
+    // bytes column
     printf("%-16s", "");
     for (size_t i = 0; i < len && i < 8; i++)
         printf("%02X ", addr[i]);
     for (size_t i = len; i < 8 && i < 8; i++)
         printf("   ");
 
-    // Ret
-    if (ins->op == 0xC3)
+    // name from table
+    if (ins->op_desc && ins->op_desc->mnemonic && ins->op_desc->mnemonic[0])
     {
-        puts("ret");
-        return;
-    }
-
-    // PUSH/POP opcode+rd families (force 64-bit in long mode)
-    if ((ins->op & 0xF8) == 0x50)
-    {
-        unsigned rd = (ins->op & 7) | ((ins->rex & 0x1) ? 8 : 0);
-        printf("push %%%s\n", reg_name(rd, 64, ins->rex));
-        return;
-    }
-    if ((ins->op & 0xF8) == 0x58)
-    {
-        unsigned rd = (ins->op & 7) | ((ins->rex & 0x1) ? 8 : 0);
-        printf("pop %%%s\n", reg_name(rd, 64, ins->rex));
-        return;
-    }
-
-    // Table-free prints for the ops we actually see
-    switch (ins->op)
-    {
-    case 0x89:
-        printf("mov ");
-        print_mov_add_operands(ins, 0x89, ins->op_size);
+        printf("%s ", ins->op_desc->mnemonic);
+        print_operands_generic(ins);
         puts("");
-        break;
-    case 0x8B:
-        printf("mov ");
-        print_mov_add_operands(ins, 0x8B, ins->op_size);
-        puts("");
-        break;
-    case 0x01:
-        printf("add ");
-        print_mov_add_operands(ins, 0x01, ins->op_size);
-        puts("");
-        break;
-    default:
+    }
+    else
+    {
         puts("db 0x??");
-        break; // fallback
     }
 }
-
-/* ---------------- Driver ---------------- */
 
 void disas(const uint8_t *ptr, size_t size)
 {
