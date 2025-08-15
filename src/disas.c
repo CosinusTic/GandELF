@@ -7,20 +7,15 @@
 #include <stdio.h>
 #include <string.h>
 
-// Readability constants for modrm types
-#define N 0 // MODRM_NONE
-#define R 1 // MODRM_REG
-#define D 2 // MODRM_DIGIT
-#define G(x) (x) // digit group
-
 struct asm_ins
 {
     // Prefixes / mode
     bool has_66, has_67;
     bool lock, rep, repne;
-    uint8_t rex; // 0100WRXB
+    uint8_t rex; // 0100WRXB, byte extension
+    uint8_t rex_w, rex_r, rex_x, rex_b;
     int op_size; // 16/32/64 (Z-width)
-    int addr_size; // (unused for now)
+    int addr_size; // TODO: Use
 
     // Opcode bytes
     uint8_t map; // 1, 0x0F, 0x38, 0x3A
@@ -30,13 +25,17 @@ struct asm_ins
 
     // ModR/M / SIB
     bool has_modrm, has_sib;
-    uint8_t modrm, sib;
-    uint8_t mod, reg, rm; // 3-bit fields (extended by REX)
-    uint8_t scale, index, base; // from SIB
+    uint8_t modrm; // Operands encoding
+    uint8_t mod; // 2 bits, displacement size
+    uint8_t reg; // 3 bits, either opcode extension of register reference
+    uint8_t rm; // 3-bits, direct or indirect register operand (extended by REX)
+
+    uint8_t sib; // Memory addressing
+    uint8_t scale, index, base; // Addr = base + (index * scale) + disp
 
     // Displacement / immediates
     int disp_size;
-    int imm_size; // TODO: resolve
+    int imm_size; // Size if encoded operands in instruction
     int64_t disp; // sign-extended disp8/disp32
     uint64_t imm; // raw immediate value TODO: use this
 };
@@ -80,10 +79,11 @@ static const char *reg_name(unsigned reg, int width, uint8_t rex)
     }
 }
 
-static int resolve_imm_size(const struct opcode_info *d, int z)
+static int resolve_imm_size(struct asm_ins *ins)
 {
-    (void)z;
-    if (!d)
+    const struct opcode_info *d = ins->op_desc;
+
+    if (!ins->op_desc)
         return 0;
     if (d->imm_size)
         return d->imm_size;
@@ -102,6 +102,13 @@ static int resolve_imm_size(const struct opcode_info *d, int z)
             return 4;
         case OT_IMM64:
             return 8;
+        case OT_IMMZ: {
+            if (ins->rex_w)
+                return 8;
+            if (ins->has_66)
+                return 2;
+            return 4;
+        }
         default:
             break;
         }
@@ -110,31 +117,44 @@ static int resolve_imm_size(const struct opcode_info *d, int z)
     return 0;
 }
 
-static void extract_modrm(struct asm_ins *ins)
+static void decode_modrm(struct asm_ins *ins)
 {
     ins->mod = ins->modrm >> 6;
     ins->reg = (ins->modrm >> 3) & 7;
     ins->rm = ins->modrm & 7;
 
-    if (ins->rex & 0x4)
-        ins->reg |= 8; // REX.R
-    if (ins->rex & 0x1)
-        ins->rm |= 8; // REX.B
+    if (ins->op_desc->modrm_kind == R && ins->rex_r)
+        ins->reg |= 8;
+    if (ins->rex_b)
+        ins->rm |= 8;
 }
 
-static void extract_sib(struct asm_ins *ins)
+static void decode_sib(struct asm_ins *ins)
 {
     ins->scale = ins->sib >> 6;
     ins->index = (ins->sib >> 3) & 7;
     ins->base = ins->sib & 7;
 
-    if (ins->rex & 0x2)
+    if (ins->rex_x)
         ins->index |= 8; // REX.X
-    if (ins->rex & 0x1)
+    if (ins->rex_b)
         ins->base |= 8; // REX.B
 }
 
-// Memory formatter: [base + index*scale + disp]
+// 0100WRXB, byte extension
+static void decode_rex(struct asm_ins *ins)
+{
+    if (ins->rex)
+    {
+        const uint8_t r = ins->rex;
+        ins->rex_b = (r >> 0) & 1;
+        ins->rex_x = (r >> 1) & 1;
+        ins->rex_r = (r >> 2) & 1;
+        ins->rex_w = (r >> 3) & 1;
+    }
+}
+
+// Memory formatter: addr =  base + index*scale + disp
 static void format_mem(char *buf, size_t cap, const struct asm_ins *ins)
 {
     // Address register width (32 when 67h, else 64)
@@ -394,50 +414,86 @@ static void print_simple(const uint8_t *addr, size_t len,
     putchar('\n');
 }
 
-size_t decode64(const uint8_t *p, size_t max, struct asm_ins *ins)
+static size_t get_prefixes(const uint8_t *p, struct asm_ins *ins, size_t max)
 {
     const uint8_t *start = p;
     const uint8_t *end = p + max;
-    memset(ins, 0, sizeof(*ins));
 
-    // Prefixes
+    uint8_t pending_rex = 0;
+
     while (1)
     {
         if (p >= end)
-            return 0;
+            return (size_t)-1;
+
         uint8_t b = *p;
+
         if (b == 0x66)
         {
             ins->has_66 = true;
             p++;
+            pending_rex = 0;
             continue;
         }
         if (b == 0x67)
         {
             ins->has_67 = true;
             p++;
+            pending_rex = 0;
             continue;
         }
         if (b == 0xF0)
         {
             ins->lock = true;
             p++;
+            pending_rex = 0;
             continue;
         }
         if (b == 0xF3)
         {
             ins->rep = true;
             p++;
+            pending_rex = 0;
+            continue;
+        }
+        if (b == 0xF2)
+        {
+            ins->repne = true;
+            p++;
+            pending_rex = 0;
+            continue;
+        }
+        if (b == 0x2E || b == 0x36 || b == 0x3E || b == 0x26 || b == 0x64
+            || b == 0x65) // Segment overrides
+        {
+            p++;
+            pending_rex = 0;
             continue;
         }
         if (b >= 0x40 && b <= 0x4F)
         {
-            ins->rex = b;
+            pending_rex = b;
             p++;
             continue;
         }
+
         break;
     }
+
+    // Last effective REX is the only valid REX
+    ins->rex = pending_rex;
+
+    return (size_t)(p - start);
+}
+
+size_t decode64(const uint8_t *p, size_t max, struct asm_ins *ins)
+{
+    const uint8_t *start = p;
+    const uint8_t *end = p + max;
+    memset(ins, 0, sizeof(*ins));
+
+    p += get_prefixes(p, ins, max);
+    decode_rex(ins);
 
     // Map
     if (p >= end)
@@ -471,12 +527,7 @@ size_t decode64(const uint8_t *p, size_t max, struct asm_ins *ins)
     ins->op = *p++;
 
     // Operand-size (Z)
-    ins->op_size = 32;
-    if (ins->rex & 0x08) // REX.W
-        ins->op_size = 64;
-    else if (ins->has_66)
-        ins->op_size = 16;
-
+    ins->op_size = ins->rex_w ? 64 : (ins->has_66 ? 16 : 32);
     ins->addr_size = ins->has_67 ? 32 : 64;
 
     // Descriptor
@@ -491,7 +542,7 @@ size_t decode64(const uint8_t *p, size_t max, struct asm_ins *ins)
             return 0;
         ins->has_modrm = true;
         ins->modrm = *p++;
-        extract_modrm(ins);
+        decode_modrm(ins);
     }
 
     // SIB + displacement handling
@@ -504,7 +555,7 @@ size_t decode64(const uint8_t *p, size_t max, struct asm_ins *ins)
                 return 0;
             ins->has_sib = true;
             ins->sib = *p++;
-            extract_sib(ins);
+            decode_sib(ins);
         }
 
         // displacement size
@@ -516,7 +567,7 @@ size_t decode64(const uint8_t *p, size_t max, struct asm_ins *ins)
         {
             if ((ins->rm & 7) == 5)
                 ins->disp_size = 4;
-            if (ins->has_sib && ((ins->sib & 7) == 5))
+            if (ins->map == 0 && ins->has_sib && ((ins->sib & 7) == 5))
                 ins->disp_size = 4;
         }
 
@@ -537,7 +588,7 @@ size_t decode64(const uint8_t *p, size_t max, struct asm_ins *ins)
         }
     }
 
-    ins->imm_size = resolve_imm_size(ins->op_desc, ins->op_size);
+    ins->imm_size = resolve_imm_size(ins);
 
     // Immediates (only used for bounds check & pointer update)
     if (ins->imm_size)
@@ -551,8 +602,6 @@ size_t decode64(const uint8_t *p, size_t max, struct asm_ins *ins)
 
     return (size_t)(p - start);
 }
-
-/* ---------------- Pretty-printer (simple) ---------------- */
 
 /* Syntax
  * Intel: mov dst, src

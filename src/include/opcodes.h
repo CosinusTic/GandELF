@@ -3,10 +3,11 @@
 
 #include <stdint.h>
 
-#define N 0
-#define R 1
-#define D 2
-#define G(x) (x)
+// Readability constants for modrm types
+#define N 0 // MODRM_NONE
+#define R 1 // MODRM_REG
+#define D 2 // MODRM_DIGIT
+#define G(x) (x) // digit group
 
 // Operand type codes
 #define OT_NONE 0
@@ -16,6 +17,7 @@
 #define OT_IMM16 4
 #define OT_IMM32 5
 #define OT_IMM64 6
+#define OT_IMMZ 23
 #define OT_REL8 7
 #define OT_REL32 8
 #define OT_AL 9
