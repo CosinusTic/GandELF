@@ -136,9 +136,9 @@ static void decode_sib(struct asm_ins *ins)
     ins->base = ins->sib & 7;
 
     if (ins->rex_x)
-        ins->index |= 8; // REX.X
+        ins->index |= 8;
     if (ins->rex_b)
-        ins->base |= 8; // REX.B
+        ins->base |= 8;
 }
 
 // 0100WRXB, byte extension
@@ -567,7 +567,7 @@ size_t decode64(const uint8_t *p, size_t max, struct asm_ins *ins)
         {
             if ((ins->rm & 7) == 5)
                 ins->disp_size = 4;
-            if (ins->map == 0 && ins->has_sib && ((ins->sib & 7) == 5))
+            if (ins->map == 0 && ins->has_sib && ins->base == 5)
                 ins->disp_size = 4;
         }
 
