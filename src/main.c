@@ -75,6 +75,17 @@ int main(int argc, char **argv)
     print_text_funcs(&lst);
 
     struct sym_info *sym = lst.items;
+
+    for (size_t i = 0; i < lst.count; i++)
+    {
+        if (strcmp(lst.items[i].name, "mult") == 0
+            || strcmp(lst.items[i].name, "divide") == 0)
+        {
+            printf("x86 disas of symbol %s\n", lst.items[i].name);
+            disas((uint8_t *)lst.items[i].bytes, lst.items[i].size,
+                  (uint64_t)lst.items[i].addr);
+        }
+    }
     printf("x86 ASM for symbol: %s\n", sym->name);
     disas((uint8_t *)sym->bytes, sym->size, (uint64_t)sym->addr);
 
