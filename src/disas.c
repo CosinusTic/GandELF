@@ -1,6 +1,7 @@
 // src/disas.c
 #include "include/opcodes.h"
 #include "include/pretty_print.h"
+#include "include/disas.h"
 
 #include <inttypes.h>
 #include <stdbool.h>
@@ -40,10 +41,6 @@ struct asm_ins
     int64_t disp; // sign-extended disp8/disp32
     uint64_t imm; // raw immediate value TODO: use this
 };
-
-/* Parsing order:
-[prefixes] -> [0F?/map] -> [opcode byte] -> [ModR/M? -> SIB? -> disp?] -> [imm?]
-*/
 
 static const char *reg8_no_rex[16] = { "al",   "cl",   "dl",   "bl",
                                        "ah",   "ch",   "dh",   "bh",
@@ -142,7 +139,6 @@ static void decode_sib(struct asm_ins *ins)
         ins->base |= 8;
 }
 
-// 0100WRXB, byte extension
 static void decode_rex(struct asm_ins *ins)
 {
     if (ins->rex)
@@ -158,13 +154,11 @@ static void decode_rex(struct asm_ins *ins)
 // Memory formatter: addr =  base + index*scale + disp
 static void format_mem(char *buf, size_t cap, const struct asm_ins *ins)
 {
-    // Address register width (32 when 67h, else 64)
     const int aw = ins->addr_size;
 
-    // RIP-relative
+    // case RIP-relative (!SIB && mod == 0 && rm=101)
     if (!ins->has_sib && ins->mod != 3 && ((ins->rm & 7) == 5) && aw == 64)
     {
-        // disp32 is relative to next RIP, just show [rip+disp]
         if (ins->disp_size == 0)
             snprintf(buf, cap, "[rip]");
         else if (ins->disp_size == 1)
@@ -174,27 +168,30 @@ static void format_mem(char *buf, size_t cap, const struct asm_ins *ins)
         return;
     }
 
-    // SIB
+    // SIB (cases base, index, both or none)
     if (ins->has_sib && ins->mod != 3)
     {
-        // Decode components
         unsigned base = ins->base;
         unsigned index = ins->index;
+
+        /*
+         * Values of ins->scale are 0, 1, 2, 3
+         * 1 << ins->scale computes 2 ^ ins->scale
+         * => turns into actual exponents (1, 2, 4, 8)
+         */
         int scale = 1 << ins->scale;
 
         const char *base_s = NULL;
         const char *index_s = NULL;
 
-        // Base = none when mod==0 && base==5  (disp32 only)
         bool have_base = !(ins->mod == 0 && ((base & 7) == 5));
-        bool have_index = ((index & 7) != 4); // 4 means "no index"
+        bool have_index = ((index & 7) != 4);
 
         if (have_base)
             base_s = reg_name(base, aw, ins->rex);
         if (have_index)
             index_s = reg_name(index, aw, ins->rex);
 
-        // Build
         if (have_base && have_index)
         {
             if (ins->disp_size == 0)
@@ -226,9 +223,8 @@ static void format_mem(char *buf, size_t cap, const struct asm_ins *ins)
                 snprintf(buf, cap, "[%s*%d%+d]", index_s, scale,
                          (int)(int32_t)ins->disp);
         }
-        else
+        else // just disp
         {
-            // pure disp
             if (ins->disp_size == 0)
                 snprintf(buf, cap, "[0]");
             else if (ins->disp_size == 1)
@@ -296,7 +292,6 @@ static void print_operand_generic(const struct asm_ins *ins, uint8_t kind,
     (void)idx;
     switch (kind)
     {
-    // registers encoded via ModR/M or, if no ModR/M, in opcode (push/pop)
     case OT_REG:
     case OT_REG8:
     case OT_REG16:
@@ -333,8 +328,8 @@ static void print_operand_generic(const struct asm_ins *ins, uint8_t kind,
             printf("%s", reg_name(ins->rm, w, ins->rex));
         else
         {
-            char mem[64];
-            format_mem(mem, sizeof mem, ins);
+            char mem[OP_BUFSIZE];
+            format_mem(mem, OP_BUFSIZE, ins);
             printf("%s", mem);
         }
         break;
@@ -381,7 +376,8 @@ static void print_operand_generic(const struct asm_ins *ins, uint8_t kind,
     }
 }
 
-static size_t get_prefixes(const uint8_t *p, struct asm_ins *ins, size_t max)
+static size_t resolve_prefixes(const uint8_t *p, struct asm_ins *ins,
+                               size_t max)
 {
     const uint8_t *start = p;
     const uint8_t *end = p + max;
@@ -453,18 +449,14 @@ static size_t get_prefixes(const uint8_t *p, struct asm_ins *ins, size_t max)
     return (size_t)(p - start);
 }
 
-size_t decode64(const uint8_t *p, size_t max, struct asm_ins *ins)
+static size_t resolve_map(const uint8_t *p, struct asm_ins *ins, size_t max)
 {
     const uint8_t *start = p;
     const uint8_t *end = p + max;
-    memset(ins, 0, sizeof(*ins));
 
-    p += get_prefixes(p, ins, max);
-    decode_rex(ins);
-
-    // Map
     if (p >= end)
-        return 0;
+        return (size_t)-1;
+
     if (*p == 0x0F)
     {
         p++;
@@ -487,6 +479,69 @@ size_t decode64(const uint8_t *p, size_t max, struct asm_ins *ins)
     {
         ins->map = 1;
     }
+
+    return (size_t)(p - start);
+}
+
+static void resolve_disp_size(struct asm_ins *ins)
+{
+    ins->disp_size = 0;
+
+    if (ins->mod == 1)
+    {
+        ins->disp_size = 1;
+        return;
+    }
+    if (ins->mod == 2)
+    {
+        ins->disp_size = 4;
+        return;
+    }
+
+    if (ins->mod == 0)
+    {
+        // No SIB case: rm==101b
+        if ((ins->rm & 7) == 5)
+        {
+            ins->disp_size = 4;
+            return;
+        }
+        // SIB case: base==101b
+        if (ins->has_sib)
+        {
+            uint8_t base_raw = ins->sib & 7;
+            if (base_raw == 5)
+            {
+                ins->disp_size = 4;
+                return;
+            }
+        }
+    }
+}
+
+/* Parsing order:
+[prefixes] -> [0F?/map] -> [opcode byte] -> [ModR/M? -> SIB? -> disp?] -> [imm?]
+*/
+
+size_t decode64(const uint8_t *p, size_t max, struct asm_ins *ins)
+{
+    const uint8_t *start = p;
+    const uint8_t *end = p + max;
+    size_t rem = (size_t)(end - p);
+    memset(ins, 0, sizeof(*ins));
+
+    size_t l_prefix = resolve_prefixes(p, ins, rem);
+    if (l_prefix == (size_t)-1)
+        return 0;
+    p += l_prefix;
+
+    decode_rex(ins);
+
+    rem = (size_t)(end - p);
+    size_t l_map = resolve_map(p, ins, max);
+    if (l_map == (size_t)-1)
+        return 0;
+    p += l_map;
 
     // Opcode
     if (p >= end)
@@ -525,18 +580,7 @@ size_t decode64(const uint8_t *p, size_t max, struct asm_ins *ins)
             decode_sib(ins);
         }
 
-        // displacement size
-        if (ins->mod == 1)
-            ins->disp_size = 1;
-        else if (ins->mod == 2)
-            ins->disp_size = 4;
-        else if (ins->mod == 0)
-        {
-            if ((ins->rm & 7) == 5)
-                ins->disp_size = 4;
-            if (ins->map == 0 && ins->has_sib && ins->base == 5)
-                ins->disp_size = 4;
-        }
+        resolve_disp_size(ins);
 
         // read displacement
         if (ins->disp_size)
@@ -610,7 +654,6 @@ static void print_asm_ins(const uint8_t *addr, size_t len,
  * Intel: mov dst, src
  * AT&T:  mov src, dst
  */
-
 void disas(const uint8_t *ptr, size_t size, uint64_t start_rip)
 {
     puts("Test parsing of bytes");

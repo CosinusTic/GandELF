@@ -19,7 +19,6 @@ int main(int argc, char **argv)
         return 1;
     }
 
-    printf(ANSI_COLOR_RED "This text is RED!" ANSI_COLOR_RESET "\n");
     char *target_bin = argv[1];
     struct file *f = file_map(target_bin);
     if (!f)
