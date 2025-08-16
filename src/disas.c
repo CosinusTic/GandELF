@@ -574,7 +574,7 @@ static void print_asm_ins(const uint8_t *addr, size_t len,
                           const struct asm_ins *ins, uint64_t rip)
 {
     // bytes column (8 bytes max)
-    printf("RIP: 0x%08lx\t", rip);
+    printf("RIP: 0x%016" PRIx64 "\t", rip);
     printf("%-16s", "");
     for (size_t i = 0; i < len && i < 8; i++)
         printf("%02X ", addr[i]);
