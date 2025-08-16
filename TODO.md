@@ -1,11 +1,8 @@
 ## TODO
-- Parse .text section
-    - Get parsed sections into a linked list (each symbol with fields address, size, and name)
-    - Or an array ? Simply a static [] of struct (known size thanks to number of function symbols)
-
 - Parse opcode manually for each section
+
 ```asm
-<function_name>:
+0x00000150 <function_name>:
   0x401000:   mov eax, 1
   0x401003:   ret
 ```

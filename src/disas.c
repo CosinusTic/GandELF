@@ -1,5 +1,6 @@
 // src/disas.c
 #include "include/opcodes.h"
+#include "include/pretty_print.h"
 
 #include <inttypes.h>
 #include <stdbool.h>
@@ -15,7 +16,7 @@ struct asm_ins
     uint8_t rex; // 0100WRXB, byte extension
     uint8_t rex_w, rex_r, rex_x, rex_b;
     int op_size; // 16/32/64 (Z-width)
-    int addr_size; // TODO: Use
+    int addr_size;
 
     // Opcode bytes
     uint8_t map; // 1, 0x0F, 0x38, 0x3A
@@ -380,40 +381,6 @@ static void print_operand_generic(const struct asm_ins *ins, uint8_t kind,
     }
 }
 
-static void print_simple(const uint8_t *addr, size_t len,
-                         const struct asm_ins *ins)
-{
-    // bytes column (8 bytes max)
-    printf("%-16s", "");
-    for (size_t i = 0; i < len && i < 8; i++)
-        printf("%02X ", addr[i]);
-    for (size_t i = len; i < 8 && i < 8; i++)
-        printf("   ");
-
-    // Mnemonic
-    if (!ins->op_desc || !ins->op_desc->mnemonic || !ins->op_desc->mnemonic[0])
-    {
-        printf("db 0x%02X\n", ins->op);
-        return;
-    }
-    printf("%s", ins->op_desc->mnemonic);
-
-    // Operands
-    if (ins->op_desc->operand_count == 0)
-    {
-        putchar('\n');
-        return;
-    }
-    putchar(' ');
-    for (int i = 0; i < ins->op_desc->operand_count; i++)
-    {
-        if (i)
-            printf(", ");
-        print_operand_generic(ins, ins->op_desc->operand_types[i], i);
-    }
-    putchar('\n');
-}
-
 static size_t get_prefixes(const uint8_t *p, struct asm_ins *ins, size_t max)
 {
     const uint8_t *start = p;
@@ -603,17 +570,54 @@ size_t decode64(const uint8_t *p, size_t max, struct asm_ins *ins)
     return (size_t)(p - start);
 }
 
+static void print_asm_ins(const uint8_t *addr, size_t len,
+                          const struct asm_ins *ins, uint64_t rip)
+{
+    // bytes column (8 bytes max)
+    printf("RIP: 0x%08lx\t", rip);
+    printf("%-16s", "");
+    for (size_t i = 0; i < len && i < 8; i++)
+        printf("%02X ", addr[i]);
+    for (size_t i = len; i < 8 && i < 8; i++)
+        printf("   ");
+
+    // Mnemonic
+    if (!ins->op_desc || !ins->op_desc->mnemonic || !ins->op_desc->mnemonic[0])
+    {
+        printf("db 0x%02X\n", ins->op);
+        return;
+    }
+    printf(ANSI_COLOR_RED "%s", ins->op_desc->mnemonic);
+    printf(ANSI_COLOR_RESET "");
+
+    // Operands
+    if (ins->op_desc->operand_count == 0)
+    {
+        putchar('\n');
+        return;
+    }
+    putchar(' ');
+    for (int i = 0; i < ins->op_desc->operand_count; i++)
+    {
+        if (i)
+            printf(", ");
+        print_operand_generic(ins, ins->op_desc->operand_types[i], i);
+    }
+    putchar('\n');
+}
+
 /* Syntax
  * Intel: mov dst, src
  * AT&T:  mov src, dst
  */
 
-void disas(const uint8_t *ptr, size_t size)
+void disas(const uint8_t *ptr, size_t size, uint64_t start_rip)
 {
     puts("Test parsing of bytes");
 
     const uint8_t *p = ptr;
     const uint8_t *end = ptr + size;
+    uint64_t rip = start_rip; // Track virtual address of instruction
     struct asm_ins ins;
 
     while (p < end)
@@ -630,7 +634,8 @@ void disas(const uint8_t *ptr, size_t size)
             printf(" 0x%02X", p[i]);
         putchar('\n');
 
-        print_simple(p, n, &ins);
+        print_asm_ins(p, n, &ins, rip);
         p += n;
+        rip += n;
     }
 }

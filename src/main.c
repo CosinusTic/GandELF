@@ -19,6 +19,7 @@ int main(int argc, char **argv)
         return 1;
     }
 
+    printf(ANSI_COLOR_RED "This text is RED!" ANSI_COLOR_RESET "\n");
     char *target_bin = argv[1];
     struct file *f = file_map(target_bin);
     if (!f)
@@ -76,7 +77,7 @@ int main(int argc, char **argv)
 
     struct sym_info *sym = lst.items;
     printf("x86 ASM for symbol: %s\n", sym->name);
-    disas((uint8_t *)sym->bytes, sym->size);
+    disas((uint8_t *)sym->bytes, sym->size, (uint64_t)sym->addr);
 
     free_symlist(lst);
     free(impsec);
